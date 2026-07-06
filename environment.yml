@@ -1,0 +1,12 @@
+name: gds-blender-pipeline
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.11
+  - pip
+  - git
+  - make
+  - pip:
+      - gdsfactory
