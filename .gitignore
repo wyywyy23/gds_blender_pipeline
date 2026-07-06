@@ -1,1 +1,18 @@
+# local/private PDK files
 external_pdks/
+configs/aim/layer_aliases.local.yaml
+configs/**/*.local.yaml
+
+# generated geometry
+examples/**/visual/*.gds
+examples/**/blend/*.blend
+examples/**/exports/*.stl
+examples/**/exports/*.3mf
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store
