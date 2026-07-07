@@ -9,9 +9,9 @@ from typing import Any
 import yaml
 
 DEFAULT_BODY_BASES = {
-    "SEAM": 2000,
-    "REAM": 2100,
-    "RYAM": 2200,
+    "SEAM": 3000,
+    "REAM": 3100,
+    "RYAM": 3200,
 }
 
 DEFAULT_BODY_BLOCK_SIZE = 100
