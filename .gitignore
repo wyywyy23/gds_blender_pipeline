@@ -3,6 +3,8 @@ external_pdks/
 configs/aim/
 configs/**/*.local.yaml
 
+examples/**/raw/
+
 # Python
 __pycache__/
 *.pyc
