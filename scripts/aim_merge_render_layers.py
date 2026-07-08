@@ -8,7 +8,6 @@ from typing import Any
 
 import yaml
 
-
 LayerKey = tuple[int, int]
 
 
@@ -45,7 +44,9 @@ def require_mapping(value: Any, label: str) -> dict[str, Any]:
     return value
 
 
-def read_render_layers(path: Path, *, label: str, allow_missing: bool = False) -> OrderedDict[str, dict[str, Any]]:
+def read_render_layers(
+    path: Path, *, label: str, allow_missing: bool = False
+) -> OrderedDict[str, dict[str, Any]]:
     data = load_yaml(path, allow_missing=allow_missing)
     layers_any = data.get("render_layers", {})
     layers = require_mapping(layers_any, f"{label}.render_layers")
@@ -53,10 +54,37 @@ def read_render_layers(path: Path, *, label: str, allow_missing: bool = False) -
     out: OrderedDict[str, dict[str, Any]] = OrderedDict()
     for name, spec_any in layers.items():
         if not isinstance(name, str) or not name:
-            raise ValueError(f"{label}.render_layers has a non-string or empty layer name: {name!r}")
+            raise ValueError(
+                f"{label}.render_layers has a non-string or empty layer name: {name!r}"
+            )
         spec = require_mapping(spec_any, f"{label}.render_layers.{name}")
         validate_layer_spec(name=name, spec=spec, label=label)
         out[name] = dict(spec)
+    return out
+
+
+def read_derived_regions(
+    path: Path,
+    *,
+    label: str,
+    allow_missing: bool = False,
+) -> OrderedDict[str, dict[str, Any]]:
+    data = load_yaml(path, allow_missing=allow_missing)
+    derived_any = data.get("derived_regions", {})
+    if derived_any is None:
+        derived_any = {}
+
+    derived = require_mapping(derived_any, f"{label}.derived_regions")
+
+    out: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    for name, spec_any in derived.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError(
+                f"{label}.derived_regions has a non-string or empty region name: {name!r}"
+            )
+        spec = require_mapping(spec_any, f"{label}.derived_regions.{name}")
+        out[name] = dict(spec)
+
     return out
 
 
@@ -76,7 +104,9 @@ def validate_layer_spec(*, name: str, spec: dict[str, Any], label: str) -> None:
 
     source = spec.get("source")
     if source is not None and not isinstance(source, str):
-        raise ValueError(f"{label}.render_layers.{name}.source must be a string if present")
+        raise ValueError(
+            f"{label}.render_layers.{name}.source must be a string if present"
+        )
 
     for numeric_key in ("zmin", "thickness"):
         if numeric_key in spec and not isinstance(spec[numeric_key], (int, float)):
@@ -105,7 +135,9 @@ def merge_render_layers(
                     f"and {group_name} layers"
                 )
 
-            key = parse_layer_key(spec.get("layer"), label=f"{group_name}.render_layers.{name}")
+            key = parse_layer_key(
+                spec.get("layer"), label=f"{group_name}.render_layers.{name}"
+            )
             if key in layer_to_name:
                 previous = layer_to_name[key]
                 raise ValueError(
@@ -160,6 +192,11 @@ def main() -> None:
         label="static",
         allow_missing=args.allow_missing_static,
     )
+    static_derived_regions = read_derived_regions(
+        args.static,
+        label="static",
+        allow_missing=args.allow_missing_static,
+    )
     merged_layers = merge_render_layers(
         doping_layers=doping_layers,
         static_layers=static_layers,
@@ -174,6 +211,7 @@ def main() -> None:
             },
             "do_not_edit": True,
         },
+        "derived_regions": static_derived_regions,
         "render_layers": merged_layers,
     }
     write_yaml(args.output, output)
@@ -182,6 +220,7 @@ def main() -> None:
         f"Merged {len(doping_layers)} doping render layers + "
         f"{len(static_layers)} static render layers = {len(merged_layers)} total"
     )
+    print(f"Static derived regions: {len(static_derived_regions)}")
     print(f"Wrote: {args.output}")
 
 

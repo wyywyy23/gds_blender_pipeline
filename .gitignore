@@ -4,6 +4,7 @@ configs/aim/
 configs/**/*.local.yaml
 
 examples/**/raw/
+examples/**/visual/
 
 # Python
 __pycache__/

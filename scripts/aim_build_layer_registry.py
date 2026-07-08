@@ -107,7 +107,11 @@ def extract_aim_layers_from_tech(
             if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
                 name = stmt.target.id
                 value_node = stmt.value
-            elif isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            elif (
+                isinstance(stmt, ast.Assign)
+                and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name)
+            ):
                 name = stmt.targets[0].id
                 value_node = stmt.value
 
@@ -124,7 +128,9 @@ def extract_aim_layers_from_tech(
             }
 
         if not out:
-            raise ValueError(f"Found class {class_name} in {tech_py}, but no layer tuples were parsed")
+            raise ValueError(
+                f"Found class {class_name} in {tech_py}, but no layer tuples were parsed"
+            )
         return out
 
     raise ValueError(f"Could not find class {class_name} in {tech_py}")
@@ -147,7 +153,9 @@ def normalize_layer_block(
 
     for name, spec_any in block.items():
         if not isinstance(name, str) or not name:
-            raise ValueError(f"{block_name} contains a non-string or empty layer name: {name!r}")
+            raise ValueError(
+                f"{block_name} contains a non-string or empty layer name: {name!r}"
+            )
         spec = require_mapping(spec_any, f"{block_name}.{name}")
         key = parse_layer_key(spec.get("layer"), label=f"{block_name}.{name}")
         if key in layer_to_name:
@@ -172,7 +180,8 @@ def flatten_input_layers(
     overlap = set(aim_layers) & set(raw_custom_layers)
     if overlap:
         raise ValueError(
-            "raw_custom_layers redefine AIM native layer names: " + ", ".join(sorted(overlap))
+            "raw_custom_layers redefine AIM native layer names: "
+            + ", ".join(sorted(overlap))
         )
 
     out: OrderedDict[str, dict[str, Any]] = OrderedDict()
@@ -213,22 +222,32 @@ def check_duplicate_layer_numbers(groups: dict[str, dict[str, dict[str, Any]]]) 
 def expression_symbols(expression: str) -> set[str]:
     if not isinstance(expression, str) or not expression.strip():
         raise ValueError("expression must be a non-empty string")
-    return {token for token in _SYMBOL_RE.findall(expression) if token not in _EXPR_OPERATOR_WORDS}
+    return {
+        token
+        for token in _SYMBOL_RE.findall(expression)
+        if token not in _EXPR_OPERATOR_WORDS
+    }
 
 
 def body_slice_names(body_name: str, body_spec: dict[str, Any]) -> set[str]:
     mode = body_spec.get("material_mode")
     if mode == "sliced":
-        slices = require_mapping(body_spec.get("slices"), f"silicon_bodies.{body_name}.slices")
+        slices = require_mapping(
+            body_spec.get("slices"), f"silicon_bodies.{body_name}.slices"
+        )
         if not slices:
             raise ValueError(f"silicon_bodies.{body_name}.slices must be non-empty")
         return set(slices)
     if mode == "single":
         slice_name = body_spec.get("slice_name")
         if not isinstance(slice_name, str) or not slice_name:
-            raise ValueError(f"silicon_bodies.{body_name}.slice_name must be a non-empty string")
+            raise ValueError(
+                f"silicon_bodies.{body_name}.slice_name must be a non-empty string"
+            )
         return {slice_name}
-    raise ValueError(f"silicon_bodies.{body_name}.material_mode must be 'sliced' or 'single'")
+    raise ValueError(
+        f"silicon_bodies.{body_name}.material_mode must be 'sliced' or 'single'"
+    )
 
 
 def validate_silicon_bodies(
@@ -243,12 +262,16 @@ def validate_silicon_bodies(
 
     for body_name, body_spec_any in silicon_bodies.items():
         if not isinstance(body_name, str) or not body_name:
-            raise ValueError(f"silicon_bodies contains an invalid body name: {body_name!r}")
+            raise ValueError(
+                f"silicon_bodies contains an invalid body name: {body_name!r}"
+            )
         body_spec = require_mapping(body_spec_any, f"silicon_bodies.{body_name}")
 
         expression = body_spec.get("expression")
         if not isinstance(expression, str) or not expression.strip():
-            raise ValueError(f"silicon_bodies.{body_name}.expression must be a non-empty string")
+            raise ValueError(
+                f"silicon_bodies.{body_name}.expression must be a non-empty string"
+            )
         unknown_symbols = expression_symbols(expression) - set(input_layers)
         if unknown_symbols:
             raise ValueError(
@@ -258,35 +281,54 @@ def validate_silicon_bodies(
 
         mode = body_spec.get("material_mode")
         if mode == "sliced":
-            slices = require_mapping(body_spec.get("slices"), f"silicon_bodies.{body_name}.slices")
+            slices = require_mapping(
+                body_spec.get("slices"), f"silicon_bodies.{body_name}.slices"
+            )
             if not slices:
                 raise ValueError(f"silicon_bodies.{body_name}.slices must be non-empty")
             for slice_name, slice_spec_any in slices.items():
                 if not isinstance(slice_name, str) or not slice_name:
-                    raise ValueError(f"silicon_bodies.{body_name}.slices has invalid name: {slice_name!r}")
+                    raise ValueError(
+                        f"silicon_bodies.{body_name}.slices has invalid name: {slice_name!r}"
+                    )
                 slice_spec = require_mapping(
                     slice_spec_any, f"silicon_bodies.{body_name}.slices.{slice_name}"
                 )
-                zmin = require_number(slice_spec.get("zmin"), f"silicon_bodies.{body_name}.slices.{slice_name}.zmin")
+                zmin = require_number(
+                    slice_spec.get("zmin"),
+                    f"silicon_bodies.{body_name}.slices.{slice_name}.zmin",
+                )
                 thickness = require_number(
                     slice_spec.get("thickness"),
                     f"silicon_bodies.{body_name}.slices.{slice_name}.thickness",
                 )
                 if thickness <= 0:
-                    raise ValueError(f"silicon_bodies.{body_name}.slices.{slice_name}.thickness must be positive")
+                    raise ValueError(
+                        f"silicon_bodies.{body_name}.slices.{slice_name}.thickness must be positive"
+                    )
                 # zmin may be negative for future layers, so only require numeric.
                 _ = zmin
         elif mode == "single":
             slice_name = body_spec.get("slice_name")
             if not isinstance(slice_name, str) or not slice_name:
-                raise ValueError(f"silicon_bodies.{body_name}.slice_name must be a non-empty string")
-            zmin = require_number(body_spec.get("zmin"), f"silicon_bodies.{body_name}.zmin")
-            thickness = require_number(body_spec.get("thickness"), f"silicon_bodies.{body_name}.thickness")
+                raise ValueError(
+                    f"silicon_bodies.{body_name}.slice_name must be a non-empty string"
+                )
+            zmin = require_number(
+                body_spec.get("zmin"), f"silicon_bodies.{body_name}.zmin"
+            )
+            thickness = require_number(
+                body_spec.get("thickness"), f"silicon_bodies.{body_name}.thickness"
+            )
             if thickness <= 0:
-                raise ValueError(f"silicon_bodies.{body_name}.thickness must be positive")
+                raise ValueError(
+                    f"silicon_bodies.{body_name}.thickness must be positive"
+                )
             _ = zmin
         else:
-            raise ValueError(f"silicon_bodies.{body_name}.material_mode must be 'sliced' or 'single'")
+            raise ValueError(
+                f"silicon_bodies.{body_name}.material_mode must be 'sliced' or 'single'"
+            )
 
         body_to_slices[body_name] = body_slice_names(body_name, body_spec)
 
@@ -336,8 +378,12 @@ def get_render_templates(doping_rules: dict[str, Any]) -> dict[str, str]:
 
 
 def expected_doping_render_layer_names(doping_rules: dict[str, Any]) -> set[str]:
-    silicon_bodies = require_mapping(doping_rules.get("silicon_bodies"), "silicon_bodies")
-    doping_markers = require_mapping(doping_rules.get("doping_markers"), "doping_markers")
+    silicon_bodies = require_mapping(
+        doping_rules.get("silicon_bodies"), "silicon_bodies"
+    )
+    doping_markers = require_mapping(
+        doping_rules.get("doping_markers"), "doping_markers"
+    )
     templates = get_render_templates(doping_rules)
 
     names: set[str] = set()
@@ -352,8 +398,16 @@ def expected_doping_render_layer_names(doping_rules: dict[str, Any]) -> set[str]
                 intrinsic_template = templates["intrinsic_template_sliced"]
                 doped_template = templates["doped_template_sliced"]
                 conflict_template = templates["conflict_template_sliced"]
-                names.add(output_name(intrinsic_template, body=body_name, slice_name=slice_name))
-                names.add(output_name(conflict_template, body=body_name, slice_name=slice_name))
+                names.add(
+                    output_name(
+                        intrinsic_template, body=body_name, slice_name=slice_name
+                    )
+                )
+                names.add(
+                    output_name(
+                        conflict_template, body=body_name, slice_name=slice_name
+                    )
+                )
             elif mode == "single":
                 intrinsic_template = templates["intrinsic_template_single"]
                 doped_template = templates["doped_template_single"]
@@ -361,12 +415,17 @@ def expected_doping_render_layer_names(doping_rules: dict[str, Any]) -> set[str]
                 names.add(output_name(intrinsic_template, body=body_name))
                 names.add(output_name(conflict_template, body=body_name))
             else:
-                raise ValueError(f"silicon_bodies.{body_name}.material_mode must be 'sliced' or 'single'")
+                raise ValueError(
+                    f"silicon_bodies.{body_name}.material_mode must be 'sliced' or 'single'"
+                )
 
             for marker_name, marker_spec_any in doping_markers.items():
-                marker_spec = require_mapping(marker_spec_any, f"doping_markers.{marker_name}")
+                marker_spec = require_mapping(
+                    marker_spec_any, f"doping_markers.{marker_name}"
+                )
                 applies_to = require_mapping(
-                    marker_spec.get("applies_to"), f"doping_markers.{marker_name}.applies_to"
+                    marker_spec.get("applies_to"),
+                    f"doping_markers.{marker_name}.applies_to",
                 )
                 body_slices = applies_to.get(body_name)
                 if body_slices is None or slice_name not in body_slices:
@@ -374,10 +433,14 @@ def expected_doping_render_layer_names(doping_rules: dict[str, Any]) -> set[str]
 
                 polarity = marker_spec.get("polarity")
                 if polarity not in {"n", "p"}:
-                    raise ValueError(f"doping_markers.{marker_name}.polarity must be 'n' or 'p'")
+                    raise ValueError(
+                        f"doping_markers.{marker_name}.polarity must be 'n' or 'p'"
+                    )
                 rank = marker_spec.get("rank")
                 if not isinstance(rank, int):
-                    raise ValueError(f"doping_markers.{marker_name}.rank must be an int")
+                    raise ValueError(
+                        f"doping_markers.{marker_name}.rank must be an int"
+                    )
 
                 if mode == "sliced":
                     names.add(
@@ -390,7 +453,11 @@ def expected_doping_render_layer_names(doping_rules: dict[str, Any]) -> set[str]
                         )
                     )
                 else:
-                    names.add(output_name(doped_template, body=body_name, polarity=polarity, rank=rank))
+                    names.add(
+                        output_name(
+                            doped_template, body=body_name, polarity=polarity, rank=rank
+                        )
+                    )
 
     return names
 
@@ -401,27 +468,39 @@ def validate_doping_rules(
     input_layers: OrderedDict[str, dict[str, Any]],
     render_layers: OrderedDict[str, dict[str, Any]],
 ) -> None:
-    silicon_bodies = require_mapping(doping_rules.get("silicon_bodies"), "silicon_bodies")
-    doping_markers = require_mapping(doping_rules.get("doping_markers"), "doping_markers")
+    silicon_bodies = require_mapping(
+        doping_rules.get("silicon_bodies"), "silicon_bodies"
+    )
+    doping_markers = require_mapping(
+        doping_rules.get("doping_markers"), "doping_markers"
+    )
     _ = get_render_templates(doping_rules)
 
     body_to_slices = validate_silicon_bodies(silicon_bodies, input_layers=input_layers)
 
     for marker_name, marker_spec_any in doping_markers.items():
         if marker_name not in input_layers:
-            raise ValueError(f"Doping marker {marker_name!r} is not defined in tech.py or raw_custom_layers.yaml")
+            raise ValueError(
+                f"Doping marker {marker_name!r} is not defined in tech.py or raw_custom_layers.yaml"
+            )
         marker_spec = require_mapping(marker_spec_any, f"doping_markers.{marker_name}")
 
         polarity = marker_spec.get("polarity")
         if polarity not in {"n", "p"}:
-            raise ValueError(f"doping_markers.{marker_name}.polarity must be 'n' or 'p'")
+            raise ValueError(
+                f"doping_markers.{marker_name}.polarity must be 'n' or 'p'"
+            )
         rank = marker_spec.get("rank")
         if not isinstance(rank, int):
             raise ValueError(f"doping_markers.{marker_name}.rank must be an int")
 
-        applies_to = require_mapping(marker_spec.get("applies_to"), f"doping_markers.{marker_name}.applies_to")
+        applies_to = require_mapping(
+            marker_spec.get("applies_to"), f"doping_markers.{marker_name}.applies_to"
+        )
         if not applies_to:
-            raise ValueError(f"doping_markers.{marker_name}.applies_to must be non-empty")
+            raise ValueError(
+                f"doping_markers.{marker_name}.applies_to must be non-empty"
+            )
 
         for body_name, slices_any in applies_to.items():
             if body_name not in body_to_slices:
@@ -443,7 +522,11 @@ def validate_doping_rules(
     missing_outputs = sorted(expected_outputs - set(render_layers))
     if missing_outputs:
         preview = ", ".join(missing_outputs[:20])
-        suffix = "" if len(missing_outputs) <= 20 else f" ... (+{len(missing_outputs) - 20} more)"
+        suffix = (
+            ""
+            if len(missing_outputs) <= 20
+            else f" ... (+{len(missing_outputs) - 20} more)"
+        )
         raise ValueError(
             "render_layers.yaml is missing doping-derived output layers expected from "
             f"doping_rules.yaml: {preview}{suffix}"
@@ -453,38 +536,143 @@ def validate_doping_rules(
     for name in expected_outputs:
         spec = render_layers[name]
         role = spec.get("role")
-        if role is not None and role not in {"silicon_intrinsic", "silicon_doped", "pn_conflict_debug"}:
-            raise ValueError(f"Render layer {name} has unexpected doping role: {role!r}")
+        if role is not None and role not in {
+            "silicon_intrinsic",
+            "silicon_doped",
+            "pn_conflict_debug",
+        }:
+            raise ValueError(
+                f"Render layer {name} has unexpected doping role: {role!r}"
+            )
 
     conflict_policy = doping_rules.get("conflict_policy", {})
     if conflict_policy is not None:
         conflict_policy = require_mapping(conflict_policy, "conflict_policy")
         pn_policy = conflict_policy.get("pn_overlap", "debug_layer")
         if pn_policy not in {"debug_layer", "error", "ignore"}:
-            raise ValueError("conflict_policy.pn_overlap must be debug_layer, error, or ignore")
+            raise ValueError(
+                "conflict_policy.pn_overlap must be debug_layer, error, or ignore"
+            )
 
     empty_policy = doping_rules.get("empty_geometry_policy", {})
     if empty_policy is not None:
         require_mapping(empty_policy, "empty_geometry_policy")
 
 
+def validate_derived_regions(
+    *,
+    derived_regions: OrderedDict[str, dict[str, Any]],
+    input_layers: OrderedDict[str, dict[str, Any]],
+) -> set[str]:
+    """Validate static preprocessing derived regions.
+
+    Derived regions are temporary geometry regions computed during GDS
+    preprocessing. They do not need GDS layer numbers.
+    """
+    known_symbols = set(input_layers)
+    derived_names: set[str] = set()
+
+    for name, spec_any in derived_regions.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"derived_regions contains an invalid name: {name!r}")
+
+        if name in known_symbols:
+            raise ValueError(
+                f"derived_regions.{name} conflicts with an existing input layer name"
+            )
+
+        spec = require_mapping(spec_any, f"derived_regions.{name}")
+
+        source = spec.get("source")
+        if not isinstance(source, str) or not source:
+            raise ValueError(
+                f"derived_regions.{name}.source must be a non-empty string"
+            )
+
+        if source not in known_symbols:
+            raise ValueError(
+                f"derived_regions.{name}.source references unknown input layer "
+                f"or previous derived region: {source!r}"
+            )
+
+        empty_policy = spec.get("empty_source_policy", "error")
+        if empty_policy not in {"error", "empty"}:
+            raise ValueError(
+                f"derived_regions.{name}.empty_source_policy must be 'error' or 'empty'"
+            )
+
+        operations_any = spec.get("operations", [])
+        if not isinstance(operations_any, list):
+            raise ValueError(f"derived_regions.{name}.operations must be a list")
+
+        for i, op_any in enumerate(operations_any):
+            op = require_mapping(op_any, f"derived_regions.{name}.operations[{i}]")
+
+            op_type = op.get("type")
+            if op_type != "offset":
+                raise ValueError(
+                    f"derived_regions.{name}.operations[{i}].type is unsupported: "
+                    f"{op_type!r}; supported operation type is 'offset'"
+                )
+
+            distance = op.get("distance")
+            if not isinstance(distance, (int, float)):
+                raise ValueError(
+                    f"derived_regions.{name}.operations[{i}].distance must be numeric"
+                )
+
+            join = op.get("join")
+            if join is not None and join not in {"miter", "bevel", "round"}:
+                raise ValueError(
+                    f"derived_regions.{name}.operations[{i}].join must be one of "
+                    "miter, bevel, or round"
+                )
+
+            tolerance = op.get("tolerance")
+            if tolerance is not None and (
+                not isinstance(tolerance, (int, float)) or tolerance <= 0
+            ):
+                raise ValueError(
+                    f"derived_regions.{name}.operations[{i}].tolerance must be "
+                    "positive if present"
+                )
+
+        known_symbols.add(name)
+        derived_names.add(name)
+
+    return derived_names
+
+
 def validate_render_layer_expressions(
     *,
     render_layers: OrderedDict[str, dict[str, Any]],
-    input_layers: OrderedDict[str, dict[str, Any]],
+    allowed_symbols: set[str],
 ) -> None:
-    input_names = set(input_layers)
+    """Validate static render-layer expressions.
+
+    Expressions may reference raw input layer names and static derived region
+    names, e.g. TUAM_CLEAN / TUAM_EXPANDED.
+    """
     for name, spec in render_layers.items():
-        expression = spec.get("expression")
-        if expression is None:
+        if spec.get("source") != "static":
             continue
-        if not isinstance(expression, str) or not expression.strip():
-            raise ValueError(f"render_layers.{name}.expression must be a non-empty string if present")
-        unknown = expression_symbols(expression) - input_names
-        if unknown:
-            raise ValueError(
-                f"render_layers.{name}.expression references unknown input layers: {sorted(unknown)}"
-            )
+
+        for field in ("expression", "preprocessing_etch_expression"):
+            expression = spec.get(field)
+            if expression is None:
+                continue
+
+            if not isinstance(expression, str) or not expression.strip():
+                raise ValueError(
+                    f"render_layers.{name}.{field} must be a non-empty string if present"
+                )
+
+            unknown = expression_symbols(expression) - allowed_symbols
+            if unknown:
+                raise ValueError(
+                    f"render_layers.{name}.{field} references unknown input layers "
+                    f"or derived regions: {sorted(unknown)}"
+                )
 
 
 def build_registry(
@@ -514,6 +702,17 @@ def build_registry(
         source_policy="preserve",
     )
 
+    derived_regions_any = render_layers_yaml.get("derived_regions", {})
+    if derived_regions_any is None:
+        derived_regions_any = {}
+    derived_regions_map = require_mapping(derived_regions_any, "derived_regions")
+    derived_regions: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    for name, spec_any in derived_regions_map.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"derived_regions contains an invalid name: {name!r}")
+        spec = require_mapping(spec_any, f"derived_regions.{name}")
+        derived_regions[name] = dict(spec)
+
     input_layers = flatten_input_layers(aim_layers, raw_custom_layers)
     all_layers = flatten_all_layers(input_layers, render_layers)
 
@@ -530,7 +729,14 @@ def build_registry(
         input_layers=input_layers,
         render_layers=render_layers,
     )
-    validate_render_layer_expressions(render_layers=render_layers, input_layers=input_layers)
+    derived_region_names = validate_derived_regions(
+        derived_regions=derived_regions,
+        input_layers=input_layers,
+    )
+    validate_render_layer_expressions(
+        render_layers=render_layers,
+        allowed_symbols=set(input_layers) | derived_region_names,
+    )
 
     registry: dict[str, Any] = {
         "metadata": {
@@ -552,7 +758,9 @@ def build_registry(
             "render": render_layers,
         },
         "processing": {
+            "doping_rules": doping_rules,
             "silicon_doping_resolution": doping_rules,
+            "static_derived_regions": derived_regions,
         },
         "all_layers": all_layers,
     }
@@ -611,12 +819,16 @@ def main() -> None:
     raw_custom_count = len(registry["input_layers"]["raw_custom"])
     render_count = len(registry["output_layers"]["render"])
     all_count = len(registry["all_layers"])
-    marker_count = len(registry["processing"]["silicon_doping_resolution"].get("doping_markers", {}))
+    marker_count = len(
+        registry["processing"]["silicon_doping_resolution"].get("doping_markers", {})
+    )
+    derived_region_count = len(registry["processing"].get("static_derived_regions", {}))
 
     print(f"AIM native layers: {aim_count}")
     print(f"Raw custom layers: {raw_custom_count}")
     print(f"Render output layers: {render_count}")
     print(f"Doping markers in rules: {marker_count}")
+    print(f"Static derived regions: {derived_region_count}")
     print(f"All named layers: {all_count}")
     print(f"Wrote: {args.output}")
 
