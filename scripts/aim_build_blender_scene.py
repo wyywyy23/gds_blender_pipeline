@@ -192,6 +192,43 @@ def set_active_object(bpy: Any, obj: Any) -> None:
     bpy.context.view_layer.objects.active = obj
 
 
+def object_world_z_bounds(obj: Any) -> tuple[float, float]:
+    from mathutils import Vector
+
+    z_values = [(obj.matrix_world @ Vector(corner)).z for corner in obj.bound_box]
+    return min(z_values), max(z_values)
+
+
+def extend_cutter_z_through_target(
+    bpy: Any,
+    *,
+    cutter: Any,
+    target: Any,
+    margin: float = 1.0,
+) -> None:
+    bpy.context.view_layer.update()
+    target_zmin, target_zmax = object_world_z_bounds(target)
+    cutter_zmin, cutter_zmax = object_world_z_bounds(cutter)
+    cutter_zmid = (cutter_zmin + cutter_zmax) / 2.0
+
+    desired_zmin = target_zmin - margin
+    desired_zmax = target_zmax + margin
+    world_to_local = cutter.matrix_world.inverted()
+
+    for vertex in cutter.data.vertices:
+        world_co = cutter.matrix_world @ vertex.co
+        world_co.z = desired_zmin if world_co.z <= cutter_zmid else desired_zmax
+        vertex.co = world_to_local @ world_co
+
+    cutter.data.update()
+    bpy.context.view_layer.update()
+    print(
+        "Extended cutter z-range for boolean: "
+        f"{cutter.name} [{cutter_zmin:.3f}, {cutter_zmax:.3f}] -> "
+        f"[{desired_zmin:.3f}, {desired_zmax:.3f}]"
+    )
+
+
 def boolean_difference(
     bpy: Any,
     *,
@@ -209,6 +246,7 @@ def boolean_difference(
         print(f"Skipping boolean: cutter object missing for {cutter_name}")
         return False
 
+    extend_cutter_z_through_target(bpy, cutter=cutter, target=target)
     set_active_object(bpy, target)
     modifier = target.modifiers.new(
         name=f"Subtract_{cutter_name}",
@@ -216,10 +254,16 @@ def boolean_difference(
     )
     modifier.operation = "DIFFERENCE"
     modifier.object = cutter
+    if hasattr(modifier, "operand_type"):
+        modifier.operand_type = "OBJECT"
     if hasattr(modifier, "solver"):
         modifier.solver = "EXACT"
+    if hasattr(modifier, "use_hole_tolerant"):
+        modifier.use_hole_tolerant = True
 
     bpy.ops.object.modifier_apply(modifier=modifier.name)
+    target.data.validate(clean_customdata=False)
+    target.data.update()
     print(f"Boolean subtracted {cutter.name} from {target.name}")
 
     if keep_cutter:
