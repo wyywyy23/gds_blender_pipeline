@@ -2,6 +2,7 @@
 external_pdks/
 configs/aim/
 configs/**/*.local.yaml
+configs/blender/aim.yaml
 
 examples/**/raw/
 examples/**/visual/

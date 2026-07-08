@@ -2,7 +2,7 @@
 """
 scripts/aim_preprocess_gds.py
 
-Minimal first-pass AIM raw GDS -> render GDS preprocessor.
+AIM raw GDS -> visual/render GDS preprocessor.
 
 Current functionality:
   - Read raw GDS using gdsfactory.
@@ -21,9 +21,6 @@ Current functionality:
   - Copy remaining static expression layers:
       nitride, contact, vias, metals, PDK black box
   - Write output visual/render GDS.
-
-Not implemented yet:
-  - Metal splitting.
 """
 
 from __future__ import annotations
@@ -174,9 +171,8 @@ def import_flat_gds(path: str | Path) -> gf.Component:
     """
     Import and flatten raw GDS using gdsfactory.
 
-    This intentionally keeps the first version simple. If we later need explicit
-    top-cell selection, add --top and pass the proper option to gf.import_gds
-    depending on the installed gdsfactory version.
+    Top-cell selection can be added as a CLI option if multi-top inputs become
+    part of the preprocessing flow.
     """
     c = gf.import_gds(str(path))
     c_flat = c.flatten() or c
@@ -784,7 +780,7 @@ def add_static_expression_render_layers(
     return stats
 
 
-def preprocess_minimal(
+def preprocess_aim_gds(
     input_gds: str | Path,
     registry_yaml: str | Path,
     output_gds: str | Path,
@@ -862,7 +858,7 @@ def preprocess_minimal(
         cladding_cutter_expression, region_symbols
     )
 
-    c_out = gf.Component(name=f"{Path(input_gds).stem}_VISUAL_MINIMAL")
+    c_out = gf.Component(name=f"{Path(input_gds).stem}_VISUAL")
     if c_out.kcl.dbu != dbu:
         raise RuntimeError(f"Output dbu {c_out.kcl.dbu} does not match input dbu {dbu}")
 
@@ -977,7 +973,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    preprocess_minimal(
+    preprocess_aim_gds(
         input_gds=args.input,
         registry_yaml=args.registry,
         output_gds=args.output,
