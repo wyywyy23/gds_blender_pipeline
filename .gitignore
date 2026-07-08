@@ -1,9 +1,21 @@
-# local/private PDK files
+# Local/private foundry and PDK files
 external_pdks/
+pdks/
+foundry/
+foundries/
+
+# AIM local layer metadata derived from private foundry data
 configs/aim/
 configs/**/*.local.yaml
 configs/blender/aim.yaml
 
+# Layout/render artifacts
+*.gds
+*.gds.gz
+*.oas
+*.oasis
+*.blend
+*.blend[0-9]*
 examples/**/raw/
 examples/**/visual/
 examples/**/blender/
@@ -12,6 +24,30 @@ examples/**/blender/
 **/__pycache__/
 **/*.pyc
 .venv/
+venv/
+env/
+__pypackages__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Tool caches and temporary files
+.cache/
+.ipynb_checkpoints/
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.log
+*.swp
+*.swo
 
 # macOS
 .DS_Store
