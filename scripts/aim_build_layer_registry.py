@@ -657,7 +657,11 @@ def validate_render_layer_expressions(
         if spec.get("source") != "static":
             continue
 
-        for field in ("expression", "preprocessing_etch_expression"):
+        for field in (
+            "expression",
+            "preprocessing_etch_expression",
+            "preprocessing_exclusion_expression",
+        ):
             expression = spec.get(field)
             if expression is None:
                 continue

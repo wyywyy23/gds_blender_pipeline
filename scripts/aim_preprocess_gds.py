@@ -11,12 +11,14 @@ Current functionality:
   - Generate substrate render regions:
       SUBSTRATE_BASE_RENDER
       SUBSTRATE_ETCHABLE_RENDER minus TUAM_EXPANDED / DIAM etch regions
+  - Generate cladding render regions:
+      CLADDING_RENDER
+      CLADDING_UNDERCUT_CUTTER_RENDER
   - Write output visual/render GDS.
 
 Not implemented yet:
   - Doping resolution.
   - Static layer expression copying.
-  - Cladding cutter generation.
   - Metal splitting.
 """
 
@@ -459,6 +461,30 @@ def preprocess_minimal(
             "SUBSTRATE_ETCHABLE_RENDER.preprocessing_etch_expression must be set"
         )
 
+    cladding = render_layers["CLADDING_RENDER"]
+    cladding_layer = get_layer(render_layers, "CLADDING_RENDER")
+    cladding_exclusion_expression = cladding.get(
+        "preprocessing_exclusion_expression", "DIAM"
+    )
+    if (
+        not isinstance(cladding_exclusion_expression, str)
+        or not cladding_exclusion_expression.strip()
+    ):
+        raise ValueError("CLADDING_RENDER.preprocessing_exclusion_expression must be set")
+
+    cladding_cutter = render_layers["CLADDING_UNDERCUT_CUTTER_RENDER"]
+    cladding_cutter_layer = get_layer(
+        render_layers, "CLADDING_UNDERCUT_CUTTER_RENDER"
+    )
+    cladding_cutter_expression = cladding_cutter.get("expression")
+    if (
+        not isinstance(cladding_cutter_expression, str)
+        or not cladding_cutter_expression.strip()
+    ):
+        raise ValueError(
+            "CLADDING_UNDERCUT_CUTTER_RENDER.expression must be set"
+        )
+
     bbox_margin = (
         float(bbox_margin_override)
         if bbox_margin_override is not None
@@ -480,6 +506,13 @@ def preprocess_minimal(
     region_symbols = input_regions | derived_regions
     etch_region = evaluate_region_expression(etch_expression, region_symbols)
     substrate_etchable_region = (substrate_region - etch_region).merged()
+    cladding_exclusion_region = evaluate_region_expression(
+        cladding_exclusion_expression, region_symbols
+    )
+    cladding_region = (substrate_region - cladding_exclusion_region).merged()
+    cladding_cutter_region = evaluate_region_expression(
+        cladding_cutter_expression, region_symbols
+    )
 
     c_out = gf.Component(name=f"{Path(input_gds).stem}_VISUAL_MINIMAL")
     if c_out.kcl.dbu != dbu:
@@ -495,6 +528,18 @@ def preprocess_minimal(
         c_out,
         region=substrate_etchable_region,
         layer=substrate_etchable_layer,
+    )
+
+    add_region(
+        c_out,
+        region=cladding_region,
+        layer=cladding_layer,
+    )
+
+    add_region(
+        c_out,
+        region=cladding_cutter_region,
+        layer=cladding_cutter_layer,
     )
 
     output_gds = Path(output_gds)
@@ -517,6 +562,16 @@ def preprocess_minimal(
     print(
         "SUBSTRATE_ETCHABLE_RENDER polygons: "
         f"{count_region_polygons(substrate_etchable_region)}"
+    )
+    print(f"CLADDING_RENDER layer: {cladding_layer}")
+    print(f"CLADDING_UNDERCUT_CUTTER_RENDER layer: {cladding_cutter_layer}")
+    print(f"Cladding exclusion expression: {cladding_exclusion_expression}")
+    print(f"Cladding exclusion polygons: {count_region_polygons(cladding_exclusion_region)}")
+    print(f"Cladding cutter expression: {cladding_cutter_expression}")
+    print(f"CLADDING_RENDER polygons: {count_region_polygons(cladding_region)}")
+    print(
+        "CLADDING_UNDERCUT_CUTTER_RENDER polygons: "
+        f"{count_region_polygons(cladding_cutter_region)}"
     )
 
     if show:
