@@ -12,7 +12,7 @@ Current functionality:
       SUBSTRATE_BASE_RENDER
       SUBSTRATE_ETCHABLE_RENDER minus TUAM_EXPANDED / DIAM etch regions
   - Generate cladding render regions:
-      CLADDING_RENDER
+      CLADDING_RENDER minus DIAM
       CLADDING_UNDERCUT_CUTTER_RENDER
   - Generate silicon render regions from doping rules:
       intrinsic silicon

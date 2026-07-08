@@ -9,7 +9,7 @@ Run from Blender, for example:
 
 This script intentionally owns the Blender-side modeling/post-processing flow:
 BlenderGDS does the GDS extrusion, then this script fixes AIM-specific scene
-details and saves the .blend artifact.
+details, applies AIM-specific booleans/materials, and saves the .blend artifact.
 """
 
 from __future__ import annotations
@@ -106,9 +106,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Skip subtracting the cladding undercut cutter from the cladding",
     )
     parser.add_argument(
-        "--keep-cladding-cutter",
+        "--show-cladding-cutter",
         action="store_true",
-        help="Keep the cladding cutter object after boolean subtraction",
+        help="Keep the cladding cutter visible after the boolean operation",
+    )
+    parser.add_argument(
+        "--apply-cladding-boolean",
+        action="store_true",
+        help="Apply the cladding boolean destructively instead of keeping a live modifier",
+    )
+    parser.add_argument(
+        "--keep-pn-conflicts",
+        action="store_true",
+        help="Keep PN conflict debug objects in the Blender scene",
     )
     parser.add_argument(
         "--no-merge-layers",
@@ -186,12 +196,6 @@ def find_imported_layer_object(bpy: Any, layer_name: str) -> Any | None:
     return bpy.data.objects.get(f"L{layer_name}") or bpy.data.objects.get(layer_name)
 
 
-def set_active_object(bpy: Any, obj: Any) -> None:
-    bpy.ops.object.select_all(action="DESELECT")
-    obj.select_set(True)
-    bpy.context.view_layer.objects.active = obj
-
-
 def object_world_z_bounds(obj: Any) -> tuple[float, float]:
     from mathutils import Vector
 
@@ -210,7 +214,6 @@ def extend_cutter_z_through_target(
     target_zmin, target_zmax = object_world_z_bounds(target)
     cutter_zmin, cutter_zmax = object_world_z_bounds(cutter)
     cutter_zmid = (cutter_zmin + cutter_zmax) / 2.0
-
     desired_zmin = target_zmin - margin
     desired_zmax = target_zmax + margin
     world_to_local = cutter.matrix_world.inverted()
@@ -223,71 +226,92 @@ def extend_cutter_z_through_target(
     cutter.data.update()
     bpy.context.view_layer.update()
     print(
-        "Extended cutter z-range for boolean: "
+        "Extended cladding cutter z-range: "
         f"{cutter.name} [{cutter_zmin:.3f}, {cutter_zmax:.3f}] -> "
         f"[{desired_zmin:.3f}, {desired_zmax:.3f}]"
     )
 
 
-def boolean_difference(
+def recalculate_mesh_normals(obj: Any) -> None:
+    import bmesh
+
+    mesh = obj.data
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+    print(f"Recalculated mesh normals: {obj.name}")
+
+
+def apply_cladding_boolean(
     bpy: Any,
     *,
-    target_name: str,
-    cutter_name: str,
-    keep_cutter: bool,
+    show_cutter: bool,
+    apply_modifier: bool,
 ) -> bool:
-    target = find_imported_layer_object(bpy, target_name)
-    cutter = find_imported_layer_object(bpy, cutter_name)
+    target = find_imported_layer_object(bpy, "CLADDING_RENDER")
+    cutter = find_imported_layer_object(bpy, "CLADDING_UNDERCUT_CUTTER_RENDER")
 
     if target is None:
-        print(f"Skipping boolean: target object missing for {target_name}")
+        print("Skipping cladding boolean: LCLADDING_RENDER not found")
         return False
     if cutter is None:
-        print(f"Skipping boolean: cutter object missing for {cutter_name}")
+        print("Skipping cladding boolean: LCLADDING_UNDERCUT_CUTTER_RENDER not found")
         return False
 
     extend_cutter_z_through_target(bpy, cutter=cutter, target=target)
-    set_active_object(bpy, target)
-    modifier = target.modifiers.new(
-        name=f"Subtract_{cutter_name}",
-        type="BOOLEAN",
-    )
+    recalculate_mesh_normals(target)
+    recalculate_mesh_normals(cutter)
+
+    bpy.ops.object.select_all(action="DESELECT")
+    target.select_set(True)
+    bpy.context.view_layer.objects.active = target
+
+    bpy.ops.object.modifier_add(type="BOOLEAN")
+    modifier = target.modifiers[len(target.modifiers) - 1]
+    modifier.name = "Cladding_Undercut"
     modifier.operation = "DIFFERENCE"
     modifier.object = cutter
-    if hasattr(modifier, "operand_type"):
-        modifier.operand_type = "OBJECT"
-    if hasattr(modifier, "solver"):
-        modifier.solver = "EXACT"
-    if hasattr(modifier, "use_hole_tolerant"):
-        modifier.use_hole_tolerant = True
 
-    bpy.ops.object.modifier_apply(modifier=modifier.name)
-    target.data.validate(clean_customdata=False)
-    target.data.update()
-    print(f"Boolean subtracted {cutter.name} from {target.name}")
+    if apply_modifier:
+        bpy.ops.object.modifier_apply(modifier=modifier.name)
+        print(f"Applied cladding boolean modifier: {cutter.name} -> {target.name}")
+    else:
+        modifier.show_viewport = True
+        modifier.show_render = True
+        print(f"Added live cladding boolean modifier: {cutter.name} -> {target.name}")
 
-    if keep_cutter:
+    if show_cutter:
+        print(f"Kept cladding cutter visible: {cutter.name}")
+    else:
         cutter.hide_viewport = True
         cutter.hide_render = True
         print(f"Hid cladding cutter object: {cutter.name}")
-    else:
-        cutter_name_before_remove = cutter.name
-        bpy.data.objects.remove(cutter, do_unlink=True)
-        print(f"Removed cladding cutter object: {cutter_name_before_remove}")
 
     return True
 
 
-def apply_aim_booleans(bpy: Any, *, keep_cladding_cutter: bool) -> int:
-    count = 0
-    if boolean_difference(
-        bpy,
-        target_name="CLADDING_RENDER",
-        cutter_name="CLADDING_UNDERCUT_CUTTER_RENDER",
-        keep_cutter=keep_cladding_cutter,
-    ):
-        count += 1
-    return count
+def remove_pn_conflict_debug_objects(bpy: Any) -> int:
+    removed = 0
+    for obj in list(bpy.data.objects):
+        if "PN_CONFLICT" not in obj.name:
+            continue
+        bpy.data.objects.remove(obj, do_unlink=True)
+        removed += 1
+
+    for mesh in list(bpy.data.meshes):
+        if "PN_CONFLICT" in mesh.name and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+
+    for material in list(bpy.data.materials):
+        if "PN_CONFLICT" in material.name and material.users == 0:
+            bpy.data.materials.remove(material)
+
+    if removed:
+        print(f"Removed {removed} PN conflict debug objects")
+    return removed
 
 
 def load_color_schema(path: Path) -> dict[str, Any]:
@@ -390,12 +414,16 @@ def build_scene(args: argparse.Namespace) -> None:
     if not args.keep_chip_base:
         remove_chip_base(bpy)
 
+    if not args.keep_pn_conflicts:
+        remove_pn_conflict_debug_objects(bpy)
+
     if not args.no_cladding_boolean:
-        boolean_count = apply_aim_booleans(
+        applied = apply_cladding_boolean(
             bpy,
-            keep_cladding_cutter=args.keep_cladding_cutter,
+            show_cutter=args.show_cladding_cutter,
+            apply_modifier=args.apply_cladding_boolean,
         )
-        print(f"Applied {boolean_count} AIM boolean operations")
+        print(f"Applied cladding boolean: {applied}")
 
     if not args.no_apply_colors:
         updated = apply_color_schema(bpy, args.color_config)
