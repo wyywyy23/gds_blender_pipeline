@@ -6,10 +6,11 @@ configs/blender/aim.yaml
 
 examples/**/raw/
 examples/**/visual/
+examples/**/blender/
 
 # Python
-__pycache__/
-*.pyc
+**/__pycache__/
+**/*.pyc
 .venv/
 
 # macOS

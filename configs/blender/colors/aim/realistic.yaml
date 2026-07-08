@@ -14,5 +14,15 @@ layers:
   # Etchable substrate with TUAM_EXPANDED and DIAM already removed.
   # GDS layer/datatype: 2001/0
   SUBSTRATE_ETCHABLE_RENDER:
-    Base Color: [0.42, 0.40, 0.36, 1.0]
-    Roughness: 0.6
+    Base Color: [0.28, 0.27, 0.25, 1.0]
+    Roughness: 0.65
+
+  # Clear oxide/glass cladding.
+  # GDS layer/datatype: 2010/0
+  CLADDING_RENDER:
+    Base Color: [0.78, 0.92, 1.0, 0.28]
+    Alpha: 0.28
+    Roughness: 0.02
+    Metallic: 0.0
+    IOR: 1.45
+    Transmission Weight: 0.65

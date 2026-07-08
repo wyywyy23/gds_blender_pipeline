@@ -1,4 +1,5 @@
 ENV_NAME := gds-blender-pipeline
+BLENDER ?= blender
 
 AIM_TECH ?= external_pdks/AIMPhotonics_ACT1/tech.py
 
@@ -11,17 +12,21 @@ AIM_RENDER_LAYERS ?= configs/aim/render_layers.yaml
 
 AIM_LAYER_REGISTRY ?= configs/aim/layer_registry.local.yaml
 AIM_BLENDERGDS_CONFIG ?= configs/blender/aim.yaml
+AIM_BLENDER_COLOR ?= configs/blender/colors/aim/realistic.yaml
 
 EXAMPLE_DIR ?= examples/aim_custom_tx_cell_undercut
 EXAMPLE_RAW_DIR ?= $(EXAMPLE_DIR)/raw
 EXAMPLE_VISUAL_DIR ?= $(EXAMPLE_DIR)/visual
+EXAMPLE_BLENDER_DIR ?= $(EXAMPLE_DIR)/blender
 EXAMPLE_GDS ?= $(EXAMPLE_RAW_DIR)/tx_array_checkered.gds
 EXAMPLE_VISUAL_GDS ?= $(EXAMPLE_VISUAL_DIR)/tx_array_checkered.visual.gds
+EXAMPLE_BLEND ?= $(EXAMPLE_BLENDER_DIR)/tx_array_checkered.blend
 
 .PHONY: \
 	env env-update env-remove env-info \
 	aim-render-layers aim-registry aim-blendergds-config \
 	aim-preprocess-example aim-preprocess-all-examples \
+	aim-blender-scene-example \
 	aim-clean-generated
 
 env:
@@ -80,9 +85,18 @@ aim-preprocess-all-examples: aim-registry aim-blendergds-config
 			--output "$$out"; \
 	done
 
+aim-blender-scene-example: aim-preprocess-example
+	mkdir -p $(EXAMPLE_BLENDER_DIR)
+	$(BLENDER) --background --python scripts/aim_build_blender_scene.py -- \
+		--gds $(EXAMPLE_VISUAL_GDS) \
+		--stack-config $(AIM_BLENDERGDS_CONFIG) \
+		--color-config $(AIM_BLENDER_COLOR) \
+		--output $(EXAMPLE_BLEND)
+
 aim-clean-generated:
 	rm -f $(AIM_RENDER_DOPING)
 	rm -f $(AIM_RENDER_LAYERS)
 	rm -f $(AIM_LAYER_REGISTRY)
 	rm -f $(AIM_BLENDERGDS_CONFIG)
 	rm -f $(EXAMPLE_VISUAL_DIR)/*.visual.gds
+	rm -f $(EXAMPLE_BLENDER_DIR)/*.blend
