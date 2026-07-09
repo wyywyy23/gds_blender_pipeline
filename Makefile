@@ -14,6 +14,7 @@ AIM_LAYER_REGISTRY ?= configs/aim/layer_registry.local.yaml
 AIM_BLENDERGDS_CONFIG ?= configs/blender/aim.yaml
 AIM_BLENDER_COLOR_DIR ?= configs/blender/colors/aim
 AIM_BLENDER_COLORS ?= $(sort $(wildcard $(AIM_BLENDER_COLOR_DIR)/*.yaml))
+AIM_BLENDER_DELETE_LAYERS ?=
 
 EXAMPLE_DIR ?= examples/aim_custom_tx_cell_undercut
 EXAMPLE_RAW_DIR ?= $(EXAMPLE_DIR)/raw
@@ -102,7 +103,8 @@ aim-blender-scene-example: aim-preprocess-example
 			--gds $(EXAMPLE_VISUAL_GDS) \
 			--stack-config $(AIM_BLENDERGDS_CONFIG) \
 			--color-config "$$color_config" \
-			--output "$$output"; \
+			--output "$$output" \
+			$(if $(strip $(AIM_BLENDER_DELETE_LAYERS)),--delete-layers "$(AIM_BLENDER_DELETE_LAYERS)"); \
 	done
 
 aim-clean-generated:

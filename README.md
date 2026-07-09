@@ -222,6 +222,20 @@ blender --background --python scripts/aim_build_blender_scene.py -- \
   --output examples/my_case/blender/my_cell.blend
 ```
 
+The scene builder removes PN-conflict debug objects by default. To also strip
+large imported render layers from the saved `.blend`, pass a comma-separated
+or space-separated list with `--delete-layers`. Short AIM names such as `cbam`
+are resolved to render-layer names such as `CBAM_RENDER`:
+
+```sh
+blender --background --python scripts/aim_build_blender_scene.py -- \
+  --gds examples/my_case/visual/my_cell.visual.gds \
+  --stack-config configs/blender/aim.yaml \
+  --color-config configs/blender/colors/aim/realistic.yaml \
+  --output examples/my_case/blender/my_cell.blend \
+  --delete-layers cbam,v1am,vaam
+```
+
 To preprocess every `.gds` file in an example raw directory:
 
 ```sh
@@ -232,7 +246,12 @@ The `aim-blender-scene-example` target is tuned for one layout at a time and
 renders all schemes listed in `AIM_BLENDER_COLORS`. For a different file name,
 override `EXAMPLE_GDS`, `EXAMPLE_VISUAL_GDS`, and `EXAMPLE_BLEND`; `EXAMPLE_BLEND`
 is used as the base output path, with the scheme name inserted before `.blend`.
-For a single custom output, use the direct Blender command above.
+For a single custom output, use the direct Blender command above. To drop extra
+layers when using the Makefile target, set `AIM_BLENDER_DELETE_LAYERS`:
+
+```sh
+AIM_BLENDER_DELETE_LAYERS="cbam v1am vaam" make aim-blender-scene-example
+```
 
 ## Useful Direct Commands
 

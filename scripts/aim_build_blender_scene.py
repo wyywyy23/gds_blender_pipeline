@@ -37,6 +37,21 @@ def blender_argv(argv: list[str]) -> list[str]:
     return []
 
 
+def split_layer_args(values: list[str] | None) -> list[str]:
+    layers: list[str] = []
+    seen: set[str] = set()
+
+    for value in values or []:
+        for layer in value.replace(",", " ").split():
+            key = layer.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            layers.append(layer)
+
+    return layers
+
+
 def default_output_blend(gds_path: Path) -> Path:
     stem = gds_path.stem
     if stem.endswith(".visual"):
@@ -121,6 +136,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Keep PN conflict debug objects in the Blender scene",
     )
     parser.add_argument(
+        "--delete-layer",
+        "--delete-layers",
+        dest="delete_layers",
+        action="append",
+        default=[],
+        metavar="NAME[,NAME...]",
+        help=(
+            "Remove additional imported render layers after import. "
+            "Accepts repeated flags or comma/space-separated names, and "
+            "short AIM aliases such as cbam for CBAM_RENDER."
+        ),
+    )
+    parser.add_argument(
         "--no-merge-layers",
         action="store_true",
         help="Disable BlenderGDS per-layer merge step",
@@ -150,6 +178,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         if args.output is None
         else args.output.resolve()
     )
+    args.delete_layers = split_layer_args(args.delete_layers)
     return args
 
 
@@ -194,6 +223,158 @@ def remove_chip_base(bpy: Any) -> None:
 
 def find_imported_layer_object(bpy: Any, layer_name: str) -> Any | None:
     return bpy.data.objects.get(f"L{layer_name}") or bpy.data.objects.get(layer_name)
+
+
+def load_blendergds_layer_names(path: Path) -> list[str]:
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} must contain a BlenderGDS layer mapping")
+    return [name for name in data if isinstance(name, str)]
+
+
+def delete_layer_name_candidates(name: str) -> list[str]:
+    token = name.strip().upper().replace("-", "_")
+    if token.startswith("MAT_"):
+        token = token[len("MAT_") :]
+
+    bases = [token]
+    if token.startswith("L") and len(token) > 1:
+        bases.append(token[1:])
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for base in bases:
+        for candidate in (base, f"{base}_RENDER"):
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            candidates.append(candidate)
+
+    return candidates
+
+
+def resolve_delete_layer_names(
+    requested_layers: list[str], stack_config: Path
+) -> tuple[list[str], list[str]]:
+    if not requested_layers:
+        return [], []
+
+    layer_names = load_blendergds_layer_names(stack_config)
+    layer_by_normalized = {name.upper(): name for name in layer_names}
+
+    resolved: list[str] = []
+    unresolved: list[str] = []
+    seen: set[str] = set()
+
+    for requested in requested_layers:
+        match = None
+        for candidate in delete_layer_name_candidates(requested):
+            match = layer_by_normalized.get(candidate)
+            if match is not None:
+                break
+
+        if match is None:
+            unresolved.append(requested)
+            continue
+
+        if match not in seen:
+            seen.add(match)
+            resolved.append(match)
+
+    return resolved, unresolved
+
+
+def strip_blender_numeric_suffix(name: str) -> str:
+    if len(name) > 4 and name[-4] == "." and name[-3:].isdigit():
+        return name[:-4]
+    return name
+
+
+def layer_datablock_name_map(layer_names: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for layer_name in layer_names:
+        out[layer_name] = layer_name
+        out[f"L{layer_name}"] = layer_name
+        out[f"Mat_{layer_name}"] = layer_name
+    return out
+
+
+def remove_orphan_layer_datablocks(
+    datablocks: Any, layer_by_datablock_name: dict[str, str]
+) -> int:
+    removed = 0
+    for datablock in list(datablocks):
+        if datablock.users != 0:
+            continue
+        base_name = strip_blender_numeric_suffix(datablock.name)
+        if base_name not in layer_by_datablock_name:
+            continue
+        datablocks.remove(datablock)
+        removed += 1
+    return removed
+
+
+def remove_orphan_mesh_refs(meshes: Any, mesh_refs: list[Any]) -> int:
+    removed = 0
+    seen: set[str] = set()
+
+    for mesh in mesh_refs:
+        if mesh is None:
+            continue
+
+        name = mesh.name
+        if name in seen:
+            continue
+        seen.add(name)
+
+        if mesh.users != 0:
+            continue
+        meshes.remove(mesh)
+        removed += 1
+
+    return removed
+
+
+def remove_render_layer_objects(bpy: Any, layer_names: list[str]) -> int:
+    if not layer_names:
+        return 0
+
+    layer_by_datablock_name = layer_datablock_name_map(layer_names)
+    removed_by_layer = {layer_name: 0 for layer_name in layer_names}
+    removed_object_meshes: list[Any] = []
+
+    for obj in list(bpy.data.objects):
+        base_name = strip_blender_numeric_suffix(obj.name)
+        layer_name = layer_by_datablock_name.get(base_name)
+        if layer_name is None:
+            continue
+        if getattr(obj, "type", None) == "MESH":
+            removed_object_meshes.append(getattr(obj, "data", None))
+        bpy.data.objects.remove(obj, do_unlink=True)
+        removed_by_layer[layer_name] += 1
+
+    removed_meshes = remove_orphan_mesh_refs(bpy.data.meshes, removed_object_meshes)
+    removed_meshes += remove_orphan_layer_datablocks(
+        bpy.data.meshes, layer_by_datablock_name
+    )
+    removed_materials = remove_orphan_layer_datablocks(
+        bpy.data.materials, layer_by_datablock_name
+    )
+
+    for layer_name in layer_names:
+        removed = removed_by_layer[layer_name]
+        if removed:
+            print(f"Removed {removed} objects from render layer {layer_name}")
+        else:
+            print(f"No imported objects found for render layer {layer_name}")
+
+    if removed_meshes or removed_materials:
+        print(
+            "Removed orphan layer data-blocks: "
+            f"{removed_meshes} meshes, {removed_materials} materials"
+        )
+
+    return sum(removed_by_layer.values())
 
 
 def object_world_z_bounds(obj: Any) -> tuple[float, float]:
@@ -416,6 +597,13 @@ def build_scene(args: argparse.Namespace) -> None:
 
     if not args.keep_pn_conflicts:
         remove_pn_conflict_debug_objects(bpy)
+
+    delete_layers, unknown_delete_layers = resolve_delete_layer_names(
+        args.delete_layers, args.stack_config
+    )
+    for layer in unknown_delete_layers:
+        print(f"Requested delete layer not found in stack config: {layer}")
+    remove_render_layer_objects(bpy, delete_layers)
 
     if not args.no_cladding_boolean:
         applied = apply_cladding_boolean(
