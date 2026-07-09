@@ -168,11 +168,16 @@ Preprocess the default example:
 make aim-preprocess-example
 ```
 
-Build the default example Blender scene:
+Build default example Blender scenes for every AIM color scheme:
 
 ```sh
 make aim-blender-scene-example
 ```
+
+The default output files are written under `examples/aim_custom_tx_cell_undercut/blender/`
+with the color scheme inserted before `.blend`, such as
+`tx_array_checkered.fancy.blend`, `tx_array_checkered.marketing.blend`, and
+`tx_array_checkered.realistic.blend`.
 
 Use a specific Blender executable if `blender` is not on your `PATH`:
 
@@ -223,9 +228,11 @@ To preprocess every `.gds` file in an example raw directory:
 EXAMPLE_DIR=examples/my_case make aim-preprocess-all-examples
 ```
 
-The `aim-blender-scene-example` target is tuned for one layout at a time. For a
-different file name, either override `EXAMPLE_GDS`, `EXAMPLE_VISUAL_GDS`, and
-`EXAMPLE_BLEND`, or use the direct Blender command above.
+The `aim-blender-scene-example` target is tuned for one layout at a time and
+renders all schemes listed in `AIM_BLENDER_COLORS`. For a different file name,
+override `EXAMPLE_GDS`, `EXAMPLE_VISUAL_GDS`, and `EXAMPLE_BLEND`; `EXAMPLE_BLEND`
+is used as the base output path, with the scheme name inserted before `.blend`.
+For a single custom output, use the direct Blender command above.
 
 ## Useful Direct Commands
 
@@ -269,10 +276,23 @@ conda run -n gds-blender-pipeline python scripts/aim_generate_blendergds_config.
 ## Color Schemes
 
 Blender materials are controlled by YAML files in
-`configs/blender/colors/aim/`. The default Makefile uses:
+`configs/blender/colors/aim/`. The example Blender target renders every YAML
+file in this directory by default.
 
 ```text
-configs/blender/colors/aim/realistic.yaml
+configs/blender/colors/aim/*.yaml
+```
+
+Available AIM color schemes:
+
+- `configs/blender/colors/aim/realistic.yaml`: muted, physically plausible materials.
+- `configs/blender/colors/aim/fancy.yaml`: high color and light contrast, grouped by material role.
+- `configs/blender/colors/aim/marketing.yaml`: shiny, more monotone graphite/champagne/platinum style.
+
+Render only a subset of schemes with:
+
+```sh
+AIM_BLENDER_COLORS=configs/blender/colors/aim/fancy.yaml make aim-blender-scene-example
 ```
 
 The color YAML keys must match render-layer names in `configs/blender/aim.yaml`.
@@ -282,7 +302,17 @@ and update the color YAML.
 Quick validation:
 
 ```sh
-conda run -n gds-blender-pipeline python -c "from pathlib import Path; import yaml; c=yaml.safe_load(Path('configs/blender/colors/aim/realistic.yaml').read_text())['layers']; s=yaml.safe_load(Path('configs/blender/aim.yaml').read_text()); print('missing', [k for k in s if k not in c]); print('extra', [k for k in c if k not in s])"
+conda run -n gds-blender-pipeline python -c '
+from pathlib import Path
+import yaml
+
+stack = yaml.safe_load(Path("configs/blender/aim.yaml").read_text())
+for path in sorted(Path("configs/blender/colors/aim").glob("*.yaml")):
+    layers = yaml.safe_load(path.read_text())["layers"]
+    missing = [key for key in stack if key not in layers]
+    extra = [key for key in layers if key not in stack]
+    print(path.name, "missing", missing, "extra", extra)
+'
 ```
 
 ## Git Hygiene

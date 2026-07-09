@@ -12,7 +12,8 @@ AIM_RENDER_LAYERS ?= configs/aim/render_layers.yaml
 
 AIM_LAYER_REGISTRY ?= configs/aim/layer_registry.local.yaml
 AIM_BLENDERGDS_CONFIG ?= configs/blender/aim.yaml
-AIM_BLENDER_COLOR ?= configs/blender/colors/aim/realistic.yaml
+AIM_BLENDER_COLOR_DIR ?= configs/blender/colors/aim
+AIM_BLENDER_COLORS ?= $(sort $(wildcard $(AIM_BLENDER_COLOR_DIR)/*.yaml))
 
 EXAMPLE_DIR ?= examples/aim_custom_tx_cell_undercut
 EXAMPLE_RAW_DIR ?= $(EXAMPLE_DIR)/raw
@@ -87,11 +88,22 @@ aim-preprocess-all-examples: aim-registry aim-blendergds-config
 
 aim-blender-scene-example: aim-preprocess-example
 	mkdir -p $(EXAMPLE_BLENDER_DIR)
-	$(BLENDER) --background --python scripts/aim_build_blender_scene.py -- \
-		--gds $(EXAMPLE_VISUAL_GDS) \
-		--stack-config $(AIM_BLENDERGDS_CONFIG) \
-		--color-config $(AIM_BLENDER_COLOR) \
-		--output $(EXAMPLE_BLEND)
+	@if [ -z "$(AIM_BLENDER_COLORS)" ]; then \
+		echo "No AIM color schemes found in $(AIM_BLENDER_COLOR_DIR)"; \
+		exit 1; \
+	fi
+	@blend_dir=$$(dirname "$(EXAMPLE_BLEND)"); \
+	blend_stem=$$(basename "$(EXAMPLE_BLEND)" .blend); \
+	for color_config in $(AIM_BLENDER_COLORS); do \
+		scheme=$$(basename "$$color_config" .yaml); \
+		output="$${blend_dir}/$${blend_stem}.$${scheme}.blend"; \
+		echo "Building Blender scene with $$scheme colors -> $$output"; \
+		$(BLENDER) --background --python scripts/aim_build_blender_scene.py -- \
+			--gds $(EXAMPLE_VISUAL_GDS) \
+			--stack-config $(AIM_BLENDERGDS_CONFIG) \
+			--color-config "$$color_config" \
+			--output "$$output"; \
+	done
 
 aim-clean-generated:
 	rm -f $(AIM_RENDER_DOPING)
