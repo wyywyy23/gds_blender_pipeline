@@ -1,0 +1,181 @@
+# SPDX-FileCopyrightText: 2026
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: AIM Marketing
+description: Shiny monotone AIM render-layer color scheme
+layers:
+  # Graphite base.
+  SUBSTRATE_BASE_RENDER: &substrate_silicon
+    Base Color: [0.045, 0.043, 0.040, 1.0]
+    Roughness: 0.52
+    Metallic: 0.0
+  SUBSTRATE_ETCHABLE_RENDER: *substrate_silicon
+
+  # Polished clear cladding.
+  CLADDING_RENDER:
+    Base Color: [0.92, 0.97, 1.0, 0.18]
+    Alpha: 0.18
+    Roughness: 0.0
+    Metallic: 0.0
+    IOR: 1.45
+    Transmission Weight: 0.82
+
+  # Hidden by default after the cladding boolean; colored for debug display.
+  CLADDING_UNDERCUT_CUTTER_RENDER:
+    Base Color: [0.92, 0.94, 0.96, 0.30]
+    Alpha: 0.28
+    Roughness: 0.10
+    Metallic: 0.0
+
+  # Silicon: bright polished silver, with subtle cool n and warm p ladders.
+  SEAM_I_BOTTOM_RENDER: &silicon_intrinsic
+    Base Color: [0.84, 0.84, 0.82, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_N10_BOTTOM_RENDER: &silicon_n10
+    Base Color: [0.82, 0.88, 0.94, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_N20_BOTTOM_RENDER: &silicon_n20
+    Base Color: [0.76, 0.83, 0.90, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_N30_BOTTOM_RENDER: &silicon_n30
+    Base Color: [0.68, 0.76, 0.85, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_N70_BOTTOM_RENDER: &silicon_n70
+    Base Color: [0.58, 0.66, 0.76, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_P10_BOTTOM_RENDER: &silicon_p10
+    Base Color: [0.94, 0.87, 0.78, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_P12_BOTTOM_RENDER: &silicon_p12
+    Base Color: [0.91, 0.84, 0.75, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_P15_BOTTOM_RENDER: &silicon_p15
+    Base Color: [0.88, 0.80, 0.72, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_P20_BOTTOM_RENDER: &silicon_p20
+    Base Color: [0.82, 0.74, 0.66, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_P25_BOTTOM_RENDER: &silicon_p25
+    Base Color: [0.76, 0.67, 0.60, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_P30_BOTTOM_RENDER: &silicon_p30
+    Base Color: [0.68, 0.59, 0.53, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_P70_BOTTOM_RENDER: &silicon_p70
+    Base Color: [0.58, 0.49, 0.44, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_PN_CONFLICT_BOTTOM_RENDER: &pn_conflict
+    Base Color: [1.0, 0.42, 0.62, 1.0]
+    Roughness: 0.18
+    Metallic: 0.0
+
+  SEAM_I_TOP_RENDER: *silicon_intrinsic
+  SEAM_N10_TOP_RENDER: *silicon_n10
+  SEAM_N12_TOP_RENDER: &silicon_n12
+    Base Color: [0.79, 0.85, 0.92, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_N20_TOP_RENDER: *silicon_n20
+  SEAM_N25_TOP_RENDER: &silicon_n25
+    Base Color: [0.72, 0.80, 0.88, 1.0]
+    Roughness: 0.20
+    Metallic: 0.0
+  SEAM_N30_TOP_RENDER: *silicon_n30
+  SEAM_N70_TOP_RENDER: *silicon_n70
+  SEAM_P10_TOP_RENDER: *silicon_p10
+  SEAM_P20_TOP_RENDER: *silicon_p20
+  SEAM_P25_TOP_RENDER: *silicon_p25
+  SEAM_P30_TOP_RENDER: *silicon_p30
+  SEAM_P70_TOP_RENDER: *silicon_p70
+  SEAM_PN_CONFLICT_TOP_RENDER: *pn_conflict
+
+  REAM_I_RENDER: *silicon_intrinsic
+  REAM_N10_RENDER: *silicon_n10
+  REAM_N12_RENDER: *silicon_n12
+  REAM_N20_RENDER: *silicon_n20
+  REAM_N25_RENDER: *silicon_n25
+  REAM_N30_RENDER: *silicon_n30
+  REAM_N70_RENDER: *silicon_n70
+  REAM_P10_RENDER: *silicon_p10
+  REAM_P20_RENDER: *silicon_p20
+  REAM_P25_RENDER: *silicon_p25
+  REAM_P30_RENDER: *silicon_p30
+  REAM_P70_RENDER: *silicon_p70
+  REAM_PN_CONFLICT_RENDER: *pn_conflict
+
+  RYAM_I_RENDER: *silicon_intrinsic
+  RYAM_N10_RENDER: *silicon_n10
+  RYAM_N12_RENDER: *silicon_n12
+  RYAM_N20_RENDER: *silicon_n20
+  RYAM_N25_RENDER: *silicon_n25
+  RYAM_N30_RENDER: *silicon_n30
+  RYAM_N70_RENDER: *silicon_n70
+  RYAM_P10_RENDER: *silicon_p10
+  RYAM_P20_RENDER: *silicon_p20
+  RYAM_P25_RENDER: *silicon_p25
+  RYAM_P30_RENDER: *silicon_p30
+  RYAM_P70_RENDER: *silicon_p70
+  RYAM_PN_CONFLICT_RENDER: *pn_conflict
+
+  # Silicon nitride waveguide layers: bright silver-blue accents.
+  FNAM_RENDER:
+    Base Color: [0.74, 0.86, 0.96, 1.0]
+    Roughness: 0.14
+    Metallic: 0.0
+    IOR: 2.0
+    Transmission Weight: 0.04
+  SNAM_RENDER:
+    Base Color: [0.62, 0.78, 0.92, 1.0]
+    Roughness: 0.14
+    Metallic: 0.0
+    IOR: 2.0
+    Transmission Weight: 0.04
+
+  # Contacts: bright polished tungsten.
+  CBAM_RENDER:
+    Base Color: [0.66, 0.68, 0.72, 1.0]
+    Metallic: 0.96
+    Roughness: 0.10
+
+  # Copper backend: bright polished silver with slight warmth.
+  M1AM_RENDER:
+    Base Color: [0.84, 0.84, 0.82, 1.0]
+    Metallic: 0.96
+    Roughness: 0.10
+  V1AM_RENDER:
+    Base Color: [0.78, 0.79, 0.78, 1.0]
+    Metallic: 0.96
+    Roughness: 0.11
+  M2AM_RENDER:
+    Base Color: [0.90, 0.90, 0.88, 1.0]
+    Metallic: 0.96
+    Roughness: 0.09
+
+  # Aluminum backend: brighter polished platinum group.
+  VAAM_RENDER:
+    Base Color: [0.88, 0.89, 0.90, 1.0]
+    Metallic: 0.96
+    Roughness: 0.09
+  MLAM_RENDER:
+    Base Color: [0.98, 0.98, 0.96, 1.0]
+    Metallic: 0.96
+    Roughness: 0.08
+
+  PDK_BLACKBOX_RENDER:
+    Base Color: [0.42, 0.43, 0.46, 0.58]
+    Alpha: 0.58
+    Roughness: 0.14
+    Metallic: 0.0
