@@ -174,6 +174,48 @@ Build default example Blender scenes for every AIM color scheme:
 make aim-blender-scene-example
 ```
 
+The scene builder preserves the GDS XY dimensions and automatically fits
+BlenderGDS's top-down camera to the visible imported layers. Camera distance
+and clipping planes follow the chip bounding box; the Sun transform and chip
+geometry are not scaled. The default `--camera-fit-margin 1.10` leaves a 10%
+camera-distance margin, which is about 4.5% image-space padding on each side of
+the limiting dimension. Pass `--no-fit-camera` to retain BlenderGDS's fixed
+camera placement.
+
+Layer elevations and thicknesses can be exaggerated independently of XY with
+`--z-scale`. For example, build the Makefile example with 20x vertical
+exaggeration while retaining its physical XY dimensions:
+
+```sh
+AIM_BLENDER_Z_SCALE=20 make aim-blender-scene-example
+```
+
+`z-scale=1` preserves the configured vertical dimensions. Values greater than
+one are visualization aids and should be recorded with rendered output. The
+factor applies to every configured layer, including substrate and cladding
+depths.
+
+Control cladding import and the undercut-opening Boolean with
+`--cladding-mode`:
+
+```text
+boolean  Import cladding and its cutter, then add the opening Boolean (default).
+solid    Import solid, uncut cladding without importing the cutter.
+omit     Import neither cladding nor the cutter.
+```
+
+The `solid` and `omit` modes filter the temporary BlenderGDS stack before GDS
+extrusion, so excluded cladding meshes are never created. This is useful for
+large layouts where the 3D Boolean or its cutter would consume excessive
+memory. The older `--no-cladding-boolean` option remains as a deprecated alias
+for `--cladding-mode solid`.
+
+For the Makefile target, set the mode with an environment override:
+
+```sh
+AIM_BLENDER_CLADDING_MODE=solid make aim-blender-scene-example
+```
+
 The default output files are written under `examples/aim_custom_tx_cell_undercut/blender/`
 with the color scheme inserted before `.blend`, such as
 `tx_array_checkered.fancy.blend`, `tx_array_checkered.marketing.blend`, and
@@ -219,7 +261,10 @@ blender --background --python scripts/aim_build_blender_scene.py -- \
   --gds examples/my_case/visual/my_cell.visual.gds \
   --stack-config configs/blender/aim.yaml \
   --color-config configs/blender/colors/aim/realistic.yaml \
-  --output examples/my_case/blender/my_cell.blend
+  --output examples/my_case/blender/my_cell.blend \
+  --z-scale 20 \
+  --camera-fit-margin 1.10 \
+  --cladding-mode solid
 ```
 
 The scene builder removes PN-conflict debug objects by default. To also strip
@@ -332,6 +377,57 @@ for path in sorted(Path("configs/blender/colors/aim").glob("*.yaml")):
     extra = [key for key in layers if key not in stack]
     print(path.name, "missing", missing, "extra", extra)
 '
+```
+
+## Camera And Render Presets
+
+Reusable camera, Cycles, output, and layer-visibility runs are stored under:
+
+```text
+configs/blender/render_presets/*.yaml
+```
+
+`trx_top_oblique_100mm.yaml` records the example oblique `trx_top` view with
+camera location `[6050, 50, 10000]`, rotation
+`[29.527, 0.000012, 32.57]` degrees, and a 100 mm perspective lens. It sets
+Cycles to 1024 non-adaptive samples with denoising disabled and defines three
+runs:
+
+- `no_backend_or_cladding`: hides CBAM, M1AM, V1AM, M2AM, VAAM, MLAM, and cladding.
+- `no_cladding`: hides only cladding.
+- `all_layers`: restores the `.blend` file's baseline layer visibility.
+
+Apply the preset to an existing built scene and render every run:
+
+```sh
+blender --background \
+  examples/aim_custom_tx_cell_undercut/blender/trx_top.realistic.blend \
+  --python scripts/aim_render_scene.py -- \
+  --preset configs/blender/render_presets/trx_top_oblique_100mm.yaml
+```
+
+Render selected runs or override the configured output directory:
+
+```sh
+blender --background path/to/scene.blend \
+  --python scripts/aim_render_scene.py -- \
+  --preset configs/blender/render_presets/trx_top_oblique_100mm.yaml \
+  --run no_cladding \
+  --run all_layers \
+  --output-dir path/to/renders
+```
+
+Use `--dry-run` to validate the camera, render settings, layer names, and output
+paths without rendering. The runner restores every object's original
+`hide_render` state between runs, so one run cannot leak visibility changes into
+the next.
+
+The Makefile wrapper uses the same preset:
+
+```sh
+make aim-render-preset
+
+AIM_RENDER_RUNS="no_cladding all_layers" make aim-render-preset
 ```
 
 ## Git Hygiene

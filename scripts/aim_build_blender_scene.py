@@ -15,8 +15,10 @@ details, applies AIM-specific booleans/materials, and saves the .blend artifact.
 from __future__ import annotations
 
 import argparse
+from itertools import product
 from pathlib import Path
 import sys
+import tempfile
 from typing import Any
 
 import yaml
@@ -29,6 +31,23 @@ DEFAULT_GDS = (
 )
 DEFAULT_STACK_CONFIG = REPO_ROOT / "configs/blender/aim.yaml"
 DEFAULT_COLOR_CONFIG = REPO_ROOT / "configs/blender/colors/aim/realistic.yaml"
+CLADDING_LAYER = "CLADDING_RENDER"
+CLADDING_CUTTER_LAYER = "CLADDING_UNDERCUT_CUTTER_RENDER"
+CLADDING_MODES = ("boolean", "solid", "omit")
+
+
+def positive_float(value: str) -> float:
+    number = float(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return number
+
+
+def camera_margin_float(value: str) -> float:
+    number = positive_float(value)
+    if number < 1.0:
+        raise argparse.ArgumentTypeError("must be at least 1.0")
+    return number
 
 
 def blender_argv(argv: list[str]) -> list[str]:
@@ -95,15 +114,32 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--unit-scale",
-        type=float,
+        type=positive_float,
         default=1e-6,
         help="GDS database unit scale passed to BlenderGDS",
     )
     parser.add_argument(
         "--z-scale",
-        type=float,
+        type=positive_float,
         default=1.0,
-        help="Vertical scale passed to BlenderGDS",
+        help=(
+            "Vertical exaggeration passed to BlenderGDS; scales layer elevations "
+            "and thicknesses without changing XY dimensions"
+        ),
+    )
+    parser.add_argument(
+        "--camera-fit-margin",
+        type=camera_margin_float,
+        default=1.10,
+        help=(
+            "Camera framing multiplier applied around the imported chip "
+            "bounding box (default: 1.10)"
+        ),
+    )
+    parser.add_argument(
+        "--no-fit-camera",
+        action="store_true",
+        help="Keep BlenderGDS's fixed camera placement instead of fitting the chip",
     )
     parser.add_argument(
         "--no-setup-scene",
@@ -116,9 +152,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Keep BlenderGDS's hardcoded ChipBase plane",
     )
     parser.add_argument(
+        "--cladding-mode",
+        choices=CLADDING_MODES,
+        default="boolean",
+        help=(
+            "Cladding handling: boolean imports cladding and cutter and adds the "
+            "opening Boolean; solid imports only uncut cladding; omit imports "
+            "neither cladding layer (default: boolean)"
+        ),
+    )
+    parser.add_argument(
         "--no-cladding-boolean",
         action="store_true",
-        help="Skip subtracting the cladding undercut cutter from the cladding",
+        help="Deprecated alias for --cladding-mode solid",
     )
     parser.add_argument(
         "--show-cladding-cutter",
@@ -170,6 +216,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
 
     args = parser.parse_args(argv)
+    if args.no_cladding_boolean:
+        if args.cladding_mode == "omit":
+            parser.error(
+                "--no-cladding-boolean cannot be combined with "
+                "--cladding-mode omit"
+            )
+        args.cladding_mode = "solid"
+    if args.cladding_mode != "boolean" and args.show_cladding_cutter:
+        parser.error("--show-cladding-cutter requires --cladding-mode boolean")
+    if args.cladding_mode != "boolean" and args.apply_cladding_boolean:
+        parser.error("--apply-cladding-boolean requires --cladding-mode boolean")
+
     args.gds = args.gds.resolve()
     args.stack_config = args.stack_config.resolve()
     args.color_config = args.color_config.resolve()
@@ -185,6 +243,44 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def require_file(path: Path, label: str) -> None:
     if not path.is_file():
         raise FileNotFoundError(f"{label} does not exist: {path}")
+
+
+def excluded_cladding_layers(mode: str) -> set[str]:
+    if mode == "boolean":
+        return set()
+    if mode == "solid":
+        return {CLADDING_CUTTER_LAYER}
+    if mode == "omit":
+        return {CLADDING_LAYER, CLADDING_CUTTER_LAYER}
+    raise ValueError(f"Unknown cladding mode: {mode}")
+
+
+def prepare_import_stack_config(
+    source: Path, *, cladding_mode: str, temp_dir: Path
+) -> Path:
+    """Write a temporary stack without cladding layers excluded before import."""
+    excluded = excluded_cladding_layers(cladding_mode)
+    if not excluded:
+        return source
+
+    data = yaml.safe_load(source.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"{source} must contain a BlenderGDS layer mapping")
+
+    filtered = {name: spec for name, spec in data.items() if name not in excluded}
+    destination = temp_dir / source.name
+    destination.write_text(
+        "# Temporary BlenderGDS stack generated by aim_build_blender_scene.py\n"
+        f"# Cladding mode: {cladding_mode}\n\n"
+        + yaml.safe_dump(filtered, sort_keys=False),
+        encoding="utf-8",
+    )
+    removed = sorted(excluded & set(data))
+    print(
+        f"Cladding mode {cladding_mode}: excluded before import: "
+        + ", ".join(removed)
+    )
+    return destination
 
 
 def require_blendergds_operator(bpy: Any) -> None:
@@ -219,6 +315,169 @@ def remove_chip_base(bpy: Any) -> None:
     if obj is not None:
         bpy.data.objects.remove(obj, do_unlink=True)
         print("Removed BlenderGDS ChipBase")
+
+
+def imported_layer_world_bounds(
+    bpy: Any, layer_names: list[str]
+) -> tuple[tuple[float, float, float], tuple[float, float, float], int]:
+    """Return world-space bounds for visible imported render-layer meshes."""
+    from mathutils import Vector
+
+    layer_object_names = {
+        name
+        for layer_name in layer_names
+        for name in (layer_name, f"L{layer_name}")
+    }
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    points: list[Any] = []
+    object_count = 0
+
+    for obj in bpy.context.scene.objects:
+        if getattr(obj, "type", None) != "MESH" or obj.hide_render:
+            continue
+        if strip_blender_numeric_suffix(obj.name) not in layer_object_names:
+            continue
+
+        evaluated = obj.evaluated_get(depsgraph)
+        if not getattr(evaluated.data, "vertices", None):
+            continue
+
+        points.extend(
+            evaluated.matrix_world @ Vector(corner) for corner in evaluated.bound_box
+        )
+        object_count += 1
+
+    if not points:
+        raise RuntimeError("No visible imported render-layer meshes found for camera fit")
+
+    minimum = tuple(min(point[axis] for point in points) for axis in range(3))
+    maximum = tuple(max(point[axis] for point in points) for axis in range(3))
+    return minimum, maximum, object_count
+
+
+def camera_frame_tangents(camera_data: Any, scene: Any) -> tuple[float, float]:
+    """Return horizontal and vertical half-frame size per unit camera distance."""
+    frame = camera_data.view_frame(scene=scene)
+    horizontal = max(abs(corner.x / corner.z) for corner in frame if corner.z)
+    vertical = max(abs(corner.y / corner.z) for corner in frame if corner.z)
+    if horizontal <= 0 or vertical <= 0:
+        raise RuntimeError("Camera has an invalid perspective frame")
+    return horizontal, vertical
+
+
+def verify_camera_contains_bounds(
+    bpy: Any,
+    camera: Any,
+    minimum: tuple[float, float, float],
+    maximum: tuple[float, float, float],
+) -> tuple[float, float, float, float]:
+    from bpy_extras.object_utils import world_to_camera_view
+    from mathutils import Vector
+
+    scene = bpy.context.scene
+    projected = [
+        world_to_camera_view(scene, camera, Vector(corner))
+        for corner in product(
+            (minimum[0], maximum[0]),
+            (minimum[1], maximum[1]),
+            (minimum[2], maximum[2]),
+        )
+    ]
+    coverage = (
+        min(point.x for point in projected),
+        max(point.x for point in projected),
+        min(point.y for point in projected),
+        max(point.y for point in projected),
+    )
+    tolerance = 1e-5
+    if (
+        coverage[0] < -tolerance
+        or coverage[1] > 1.0 + tolerance
+        or coverage[2] < -tolerance
+        or coverage[3] > 1.0 + tolerance
+    ):
+        raise RuntimeError(
+            "Camera fit did not contain the chip bounds: "
+            f"x=[{coverage[0]:.4f}, {coverage[1]:.4f}], "
+            f"y=[{coverage[2]:.4f}, {coverage[3]:.4f}]"
+        )
+    return coverage
+
+
+def fit_camera_to_imported_layers(
+    bpy: Any, *, layer_names: list[str], margin: float
+) -> bool:
+    """Fit BlenderGDS's top-down camera without changing chip or Sun transforms."""
+    scene = bpy.context.scene
+    camera = scene.camera
+    if camera is None:
+        print("Skipping camera fit: scene has no active camera")
+        return False
+    if camera.type != "CAMERA":
+        raise RuntimeError(f"Active camera object has unexpected type: {camera.type}")
+
+    minimum, maximum, object_count = imported_layer_world_bounds(bpy, layer_names)
+    width = maximum[0] - minimum[0]
+    height = maximum[1] - minimum[1]
+    depth = maximum[2] - minimum[2]
+    if width <= 0 or height <= 0:
+        raise RuntimeError(
+            f"Invalid imported chip bounds: minimum={minimum}, maximum={maximum}"
+        )
+
+    center_x = (minimum[0] + maximum[0]) / 2.0
+    center_y = (minimum[1] + maximum[1]) / 2.0
+    camera.data.shift_x = 0.0
+    camera.data.shift_y = 0.0
+    camera.rotation_mode = "XYZ"
+    camera.rotation_euler = (0.0, 0.0, 0.0)
+
+    if camera.data.type == "PERSP":
+        half_frame_x, half_frame_y = camera_frame_tangents(camera.data, scene)
+        distance = margin * max(
+            width / (2.0 * half_frame_x),
+            height / (2.0 * half_frame_y),
+        )
+    elif camera.data.type == "ORTHO":
+        frame = camera.data.view_frame(scene=scene)
+        frame_width = max(corner.x for corner in frame) - min(
+            corner.x for corner in frame
+        )
+        frame_height = max(corner.y for corner in frame) - min(
+            corner.y for corner in frame
+        )
+        scale_factor = margin * max(width / frame_width, height / frame_height)
+        camera.data.ortho_scale *= scale_factor
+        distance = max(width, height, depth, 1.0)
+    else:
+        raise RuntimeError(
+            f"Automatic camera fit does not support {camera.data.type} cameras"
+        )
+
+    camera.location = (center_x, center_y, maximum[2] + distance)
+    scene_extent = max(width, height, depth, 1.0)
+    camera.data.clip_start = max(distance * 1e-4, 1e-4)
+    camera.data.clip_end = distance + depth + scene_extent * 0.25
+    bpy.context.view_layer.update()
+
+    coverage = verify_camera_contains_bounds(bpy, camera, minimum, maximum)
+    print(
+        "Camera fit: "
+        f"{object_count} visible layers, bounds={width:.3f} x {height:.3f} x "
+        f"{depth:.3f}, margin={margin:.3f}"
+    )
+    print(
+        "Camera placement: "
+        f"location=({camera.location.x:.3f}, {camera.location.y:.3f}, "
+        f"{camera.location.z:.3f}), clip=[{camera.data.clip_start:.6f}, "
+        f"{camera.data.clip_end:.3f}]"
+    )
+    print(
+        "Camera frame coverage: "
+        f"x=[{coverage[0]:.4f}, {coverage[1]:.4f}], "
+        f"y=[{coverage[2]:.4f}, {coverage[3]:.4f}]"
+    )
+    return True
 
 
 def find_imported_layer_object(bpy: Any, layer_name: str) -> Any | None:
@@ -432,8 +691,8 @@ def apply_cladding_boolean(
     show_cutter: bool,
     apply_modifier: bool,
 ) -> bool:
-    target = find_imported_layer_object(bpy, "CLADDING_RENDER")
-    cutter = find_imported_layer_object(bpy, "CLADDING_UNDERCUT_CUTTER_RENDER")
+    target = find_imported_layer_object(bpy, CLADDING_LAYER)
+    cutter = find_imported_layer_object(bpy, CLADDING_CUTTER_LAYER)
 
     if target is None:
         print("Skipping cladding boolean: LCLADDING_RENDER not found")
@@ -573,22 +832,35 @@ def build_scene(args: argparse.Namespace) -> None:
     if not args.no_clear_scene:
         clear_scene(bpy)
 
-    bpy.context.scene.gdsii_use_custom_config = True
-    bpy.context.scene.gdsii_custom_config_path = str(args.stack_config)
-    bpy.context.scene.gdsii_custom_color_path = str(args.color_config)
+    scene = bpy.context.scene
+    scene.gdsii_use_custom_config = True
+    scene.gdsii_custom_color_path = str(args.color_config)
 
     print(f"Building AIM Blender scene from: {args.gds}")
     print(f"Layer stack config: {args.stack_config}")
     print(f"Color config:       {args.color_config}")
+    print(f"GDS unit scale:     {args.unit_scale:g}")
+    print(f"Z exaggeration:     {args.z_scale:g}x")
+    print(f"Cladding mode:      {args.cladding_mode}")
+    if args.no_cladding_boolean:
+        print("Deprecated --no-cladding-boolean mapped to --cladding-mode solid")
 
-    result = bpy.ops.import_scene.gdsii(
-        filepath=str(args.gds),
-        setup_scene=not args.no_setup_scene,
-        create_collection=not args.no_create_collection,
-        merge_layers=not args.no_merge_layers,
-        unit_scale=args.unit_scale,
-        z_scale=args.z_scale,
-    )
+    with tempfile.TemporaryDirectory(prefix="aim_blendergds_stack_") as temp_name:
+        import_stack_config = prepare_import_stack_config(
+            args.stack_config,
+            cladding_mode=args.cladding_mode,
+            temp_dir=Path(temp_name),
+        )
+        scene.gdsii_custom_config_path = str(import_stack_config)
+        result = bpy.ops.import_scene.gdsii(
+            filepath=str(args.gds),
+            setup_scene=not args.no_setup_scene,
+            create_collection=not args.no_create_collection,
+            merge_layers=not args.no_merge_layers,
+            unit_scale=args.unit_scale,
+            z_scale=args.z_scale,
+        )
+    scene.gdsii_custom_config_path = str(args.stack_config)
     if "FINISHED" not in result:
         raise RuntimeError(f"BlenderGDS import did not finish: {result}")
 
@@ -605,17 +877,29 @@ def build_scene(args: argparse.Namespace) -> None:
         print(f"Requested delete layer not found in stack config: {layer}")
     remove_render_layer_objects(bpy, delete_layers)
 
-    if not args.no_cladding_boolean:
+    if args.cladding_mode == "boolean":
         applied = apply_cladding_boolean(
             bpy,
             show_cutter=args.show_cladding_cutter,
             apply_modifier=args.apply_cladding_boolean,
         )
         print(f"Applied cladding boolean: {applied}")
+    elif args.cladding_mode == "solid":
+        print("Kept solid cladding without an undercut opening")
+    else:
+        print("Omitted cladding and cladding undercut cutter")
 
     if not args.no_apply_colors:
         updated = apply_color_schema(bpy, args.color_config)
         print(f"Updated {updated} materials from AIM color schema")
+
+    if not args.no_fit_camera:
+        fitted = fit_camera_to_imported_layers(
+            bpy,
+            layer_names=load_blendergds_layer_names(args.stack_config),
+            margin=args.camera_fit_margin,
+        )
+        print(f"Fitted camera to imported chip: {fitted}")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(args.output))

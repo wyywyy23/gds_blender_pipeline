@@ -15,6 +15,14 @@ AIM_BLENDERGDS_CONFIG ?= configs/blender/aim.yaml
 AIM_BLENDER_COLOR_DIR ?= configs/blender/colors/aim
 AIM_BLENDER_COLORS ?= $(sort $(wildcard $(AIM_BLENDER_COLOR_DIR)/*.yaml))
 AIM_BLENDER_DELETE_LAYERS ?=
+AIM_BLENDER_Z_SCALE ?= 1.0
+AIM_BLENDER_CAMERA_FIT_MARGIN ?= 1.10
+AIM_BLENDER_CLADDING_MODE ?= boolean
+
+AIM_RENDER_BLEND ?= examples/aim_custom_tx_cell_undercut/blender/trx_top.realistic.blend
+AIM_RENDER_PRESET ?= configs/blender/render_presets/trx_top_oblique_100mm.yaml
+AIM_RENDER_RUNS ?=
+AIM_RENDER_OUTPUT_DIR ?=
 
 EXAMPLE_DIR ?= examples/aim_custom_tx_cell_undercut
 EXAMPLE_RAW_DIR ?= $(EXAMPLE_DIR)/raw
@@ -28,7 +36,7 @@ EXAMPLE_BLEND ?= $(EXAMPLE_BLENDER_DIR)/tx_array_checkered.blend
 	env env-update env-remove env-info \
 	aim-render-layers aim-registry aim-blendergds-config \
 	aim-preprocess-example aim-preprocess-all-examples \
-	aim-blender-scene-example \
+	aim-blender-scene-example aim-render-preset \
 	aim-clean-generated
 
 env:
@@ -104,8 +112,18 @@ aim-blender-scene-example: aim-preprocess-example
 			--stack-config $(AIM_BLENDERGDS_CONFIG) \
 			--color-config "$$color_config" \
 			--output "$$output" \
+			--z-scale $(AIM_BLENDER_Z_SCALE) \
+			--camera-fit-margin $(AIM_BLENDER_CAMERA_FIT_MARGIN) \
+			--cladding-mode $(AIM_BLENDER_CLADDING_MODE) \
 			$(if $(strip $(AIM_BLENDER_DELETE_LAYERS)),--delete-layers "$(AIM_BLENDER_DELETE_LAYERS)"); \
 	done
+
+aim-render-preset:
+	$(BLENDER) --background $(AIM_RENDER_BLEND) \
+		--python scripts/aim_render_scene.py -- \
+		--preset $(AIM_RENDER_PRESET) \
+		$(foreach run,$(AIM_RENDER_RUNS),--run $(run)) \
+		$(if $(strip $(AIM_RENDER_OUTPUT_DIR)),--output-dir "$(AIM_RENDER_OUTPUT_DIR)")
 
 aim-clean-generated:
 	rm -f $(AIM_RENDER_DOPING)
