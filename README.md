@@ -39,7 +39,7 @@ private AIM config + raw GDS
 | [Preprocess every GDS in a case](#workflow-2-preprocess-raw-gds) | `make aim-preprocess-all-examples` | `examples/<case>/raw/*.gds` | Matching files under `examples/<case>/visual/` |
 | [Build editable Blender scenes](#workflow-3-build-an-editable-blender-scene) | `make aim-blender-scene-example` | One visual GDS, stack config, color YAML | One `.blend` per color scheme under `examples/<case>/blender/` |
 | [Render an existing scene locally](#workflow-4-render-locally-from-a-preset) | `make aim-render-preset` | Existing `.blend` and render preset | Images in the preset output directory |
-| [Prepare a farm/HPC artifact](#workflow-5-prepare-a-render-farmhpc-blend) | `make aim-prepare-render-blend` | Existing `.blend`, preset, and one run | Portable render-ready `.blend` |
+| [Prepare a farm/HPC artifact](#workflow-5-prepare-a-render-farmhpc-blend) | `make aim-prepare-render-blend` | Existing `.blend`, preset, and one run | Portable `.blend` under `examples/<case>/render_ready/` |
 | [Remove generated local files](#cleaning-generated-files) | `make aim-clean-generated` | Generated files | Generated YAML plus visual GDS and Blender files for the active case removed |
 
 Use Make for the repository defaults and repeatable workflows. Use the direct
@@ -69,9 +69,12 @@ gds_blender_pipeline/
 │   ├── aim/                             # default AIM workflow case
 │   │   ├── raw/*.gds                    # AIM input layouts
 │   │   ├── visual/*.visual.gds          # generated visualization GDS
-│   │   └── blender/
-│   │       ├── *.blend                  # generated editable/prepared scenes
-│   │       └── renders/                 # generated images
+│   │   ├── blender/
+│   │   │   ├── *.blend                  # editable scenes built from GDS
+│   │   │   └── renders/                 # local preset renders
+│   │   └── render_ready/
+│   │       ├── *.blend                  # prepared farm/HPC artifacts
+│   │       └── renders/                 # prepared-file render output
 │   ├── sky130/                          # SKY130 example layouts
 │   └── <case>/                          # optional additional cases
 └── scripts/                             # pipeline commands
@@ -91,8 +94,10 @@ The important input/output convention is:
 | `configs/blender/render_presets/` | Camera, Cycles, output, and visibility presets | No | Yes |
 | `examples/<case>/raw/` | Raw GDS input | No | No |
 | `examples/<case>/visual/` | Preprocessed render GDS | Yes | No |
-| `examples/<case>/blender/` | Editable and render-ready Blender files | Yes | No |
-| `examples/<case>/blender/renders/` | Rendered images | Yes | No |
+| `examples/<case>/blender/` | Editable Blender scenes built from visual GDS | Yes | No |
+| `examples/<case>/blender/renders/` | Images rendered directly from editable scenes | Yes | No |
+| `examples/<case>/render_ready/` | Prepared render-farm/HPC `.blend` files | Yes | No |
+| `examples/<case>/render_ready/renders/` | Images rendered from prepared files | Yes | No |
 
 ## Requirements And Setup
 
@@ -465,15 +470,20 @@ No repository scripts are needed on the render node.
 AIM_RENDER_BLEND=examples/my_case/blender/my_cell.realistic.blend \
 AIM_RENDER_PRESET=configs/blender/render_presets/my_view.yaml \
 AIM_RENDER_READY_RUN=no_cladding \
-AIM_RENDER_READY_BLEND=examples/my_case/blender/my_cell.no-cladding.render-ready.blend \
+AIM_RENDER_READY_BLEND=examples/my_case/render_ready/my_cell.no-cladding.render-ready.blend \
 make aim-prepare-render-blend
 ```
 
-If `AIM_RENDER_READY_BLEND` is omitted, the output is named:
+If `AIM_RENDER_READY_BLEND` is omitted and the source is under the case's
+`blender/` directory, the output is named:
 
 ```text
-<source>.<preset>.<run>.blend
+examples/<case>/render_ready/<source>.<preset>.<run>.blend
 ```
+
+This keeps editable scenes imported from GDS separate from files prepared for
+deployment. For a source outside a directory named `blender`, the exporter
+creates `render_ready/` beside the source file.
 
 Set `AIM_RENDER_READY_OUTPUT` to change the render path stored inside the file.
 Set `AIM_RENDER_READY_PACK=0` if shared resources will be staged separately.
@@ -485,7 +495,7 @@ blender --background examples/my_case/blender/my_cell.realistic.blend \
   --python scripts/aim_prepare_render_blend.py -- \
   --preset configs/blender/render_presets/my_view.yaml \
   --run no_cladding \
-  --output examples/my_case/blender/my_cell.no-cladding.render-ready.blend
+  --output examples/my_case/render_ready/my_cell.no-cladding.render-ready.blend
 ```
 
 Useful options:
@@ -628,6 +638,7 @@ All variables can be overridden on the command line as shown in the examples.
 | `EXAMPLE_GDS` | `<EXAMPLE_DIR>/raw/tx_array_checkered.gds` | Raw GDS input |
 | `EXAMPLE_VISUAL_GDS` | `<EXAMPLE_DIR>/visual/tx_array_checkered.visual.gds` | Visual GDS output |
 | `EXAMPLE_BLEND` | `<EXAMPLE_DIR>/blender/tx_array_checkered.blend` | Base scene output; color name is inserted |
+| `EXAMPLE_RENDER_READY_DIR` | `<EXAMPLE_DIR>/render_ready` | Prepared farm/HPC artifacts |
 | `AIM_BLENDER_COLORS` | Every `configs/blender/colors/aim/*.yaml` | Color schemes to build |
 | `AIM_BLENDER_Z_SCALE` | `1.0` | Vertical scale only |
 | `AIM_BLENDER_CAMERA_FIT_MARGIN` | `1.10` | Automatic camera-fit margin |
@@ -643,7 +654,7 @@ All variables can be overridden on the command line as shown in the examples.
 | `AIM_RENDER_RUNS` | empty/all runs | Runs selected for local rendering |
 | `AIM_RENDER_OUTPUT_DIR` | preset directory | Override local render directory |
 | `AIM_RENDER_READY_RUN` | `all_layers` | One run baked into a prepared `.blend` |
-| `AIM_RENDER_READY_BLEND` | generated name | Prepared `.blend` output path |
+| `AIM_RENDER_READY_BLEND` | `<case>/render_ready/<generated-name>.blend` | Prepared `.blend` output path |
 | `AIM_RENDER_READY_OUTPUT` | `//renders/<prepared-name>` | Render path stored in prepared file |
 | `AIM_RENDER_READY_PACK` | `1` | Pack external resources; use `0` to disable |
 
@@ -738,9 +749,10 @@ make aim-clean-generated
 ```
 
 This removes generated AIM YAML, `configs/blender/aim.yaml`, visual GDS files
-for the active example, and `.blend` files in its Blender directory. It does
-not remove private PDK files, hand-maintained AIM configuration, or renders in
-nested directories.
+for the active example, editable `.blend` files in its Blender directory, and
+prepared `.blend` files in its `render_ready` directory. It does not remove
+private PDK files, hand-maintained AIM configuration, or renders in nested
+directories.
 
 ## Git Hygiene
 

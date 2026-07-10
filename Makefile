@@ -32,6 +32,7 @@ EXAMPLE_DIR ?= examples/aim
 EXAMPLE_RAW_DIR ?= $(EXAMPLE_DIR)/raw
 EXAMPLE_VISUAL_DIR ?= $(EXAMPLE_DIR)/visual
 EXAMPLE_BLENDER_DIR ?= $(EXAMPLE_DIR)/blender
+EXAMPLE_RENDER_READY_DIR ?= $(EXAMPLE_DIR)/render_ready
 EXAMPLE_GDS ?= $(EXAMPLE_RAW_DIR)/tx_array_checkered.gds
 EXAMPLE_VISUAL_GDS ?= $(EXAMPLE_VISUAL_DIR)/tx_array_checkered.visual.gds
 EXAMPLE_BLEND ?= $(EXAMPLE_BLENDER_DIR)/tx_array_checkered.blend
@@ -145,3 +146,4 @@ aim-clean-generated:
 	rm -f $(AIM_BLENDERGDS_CONFIG)
 	rm -f $(EXAMPLE_VISUAL_DIR)/*.visual.gds
 	rm -f $(EXAMPLE_BLENDER_DIR)/*.blend
+	rm -f $(EXAMPLE_RENDER_READY_DIR)/*.blend

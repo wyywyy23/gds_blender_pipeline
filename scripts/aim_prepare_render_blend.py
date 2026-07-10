@@ -41,8 +41,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "Output .blend path. By default, append the preset and run names to "
-            "the open file's name."
+            "Output .blend path. By default, save under a render_ready directory "
+            "next to the source scene directory."
         ),
     )
     parser.add_argument(
@@ -77,7 +77,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def default_output_blend(
     source: Path, *, preset_name: str, run_name: str
 ) -> Path:
-    return source.with_name(f"{source.stem}.{preset_name}.{run_name}.blend")
+    if source.parent.name == "blender":
+        output_dir = source.parent.parent / "render_ready"
+    else:
+        output_dir = source.parent / "render_ready"
+    return output_dir / f"{source.stem}.{preset_name}.{run_name}.blend"
 
 
 def default_render_output(output_blend: Path) -> str:
