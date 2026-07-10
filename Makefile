@@ -146,4 +146,6 @@ aim-clean-generated:
 	rm -f $(AIM_BLENDERGDS_CONFIG)
 	rm -f $(EXAMPLE_VISUAL_DIR)/*.visual.gds
 	rm -f $(EXAMPLE_BLENDER_DIR)/*.blend
+	rm -f $(EXAMPLE_BLENDER_DIR)/*.blend1
 	rm -f $(EXAMPLE_RENDER_READY_DIR)/*.blend
+	rm -f $(EXAMPLE_RENDER_READY_DIR)/*.blend1
