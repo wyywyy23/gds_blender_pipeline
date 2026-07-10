@@ -284,7 +284,16 @@ def prepare_import_stack_config(
 
 
 def require_blendergds_operator(bpy: Any) -> None:
-    if hasattr(bpy.ops.import_scene, "gdsii"):
+    def operator_is_registered() -> bool:
+        # bpy.ops dynamically manufactures operator proxies, so hasattr() can
+        # return True even when no implementation is registered.
+        try:
+            bpy.ops.import_scene.gdsii.get_rna_type()
+        except (AttributeError, KeyError, RuntimeError):
+            return False
+        return True
+
+    if operator_is_registered():
         return
 
     for module_name in (
@@ -296,7 +305,7 @@ def require_blendergds_operator(bpy: Any) -> None:
             bpy.ops.preferences.addon_enable(module=module_name)
         except Exception:
             continue
-        if hasattr(bpy.ops.import_scene, "gdsii"):
+        if operator_is_registered():
             return
 
     raise RuntimeError(
