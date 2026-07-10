@@ -21,7 +21,7 @@ render:
   file_format: PNG
 
 output:
-  directory: examples/aim_custom_tx_cell_undercut/blender/renders/trx_top
+  directory: examples/aim/blender/renders/trx_top
 
 runs:
   - name: no_backend_or_cladding

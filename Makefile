@@ -19,12 +19,16 @@ AIM_BLENDER_Z_SCALE ?= 1.0
 AIM_BLENDER_CAMERA_FIT_MARGIN ?= 1.10
 AIM_BLENDER_CLADDING_MODE ?= boolean
 
-AIM_RENDER_BLEND ?= examples/aim_custom_tx_cell_undercut/blender/trx_top.realistic.blend
+AIM_RENDER_BLEND ?= examples/aim/blender/trx_top.realistic.blend
 AIM_RENDER_PRESET ?= configs/blender/render_presets/trx_top_oblique_100mm.yaml
 AIM_RENDER_RUNS ?=
 AIM_RENDER_OUTPUT_DIR ?=
+AIM_RENDER_READY_RUN ?= all_layers
+AIM_RENDER_READY_BLEND ?=
+AIM_RENDER_READY_OUTPUT ?=
+AIM_RENDER_READY_PACK ?= 1
 
-EXAMPLE_DIR ?= examples/aim_custom_tx_cell_undercut
+EXAMPLE_DIR ?= examples/aim
 EXAMPLE_RAW_DIR ?= $(EXAMPLE_DIR)/raw
 EXAMPLE_VISUAL_DIR ?= $(EXAMPLE_DIR)/visual
 EXAMPLE_BLENDER_DIR ?= $(EXAMPLE_DIR)/blender
@@ -36,7 +40,7 @@ EXAMPLE_BLEND ?= $(EXAMPLE_BLENDER_DIR)/tx_array_checkered.blend
 	env env-update env-remove env-info \
 	aim-render-layers aim-registry aim-blendergds-config \
 	aim-preprocess-example aim-preprocess-all-examples \
-	aim-blender-scene-example aim-render-preset \
+	aim-blender-scene-example aim-render-preset aim-prepare-render-blend \
 	aim-clean-generated
 
 env:
@@ -124,6 +128,15 @@ aim-render-preset:
 		--preset $(AIM_RENDER_PRESET) \
 		$(foreach run,$(AIM_RENDER_RUNS),--run $(run)) \
 		$(if $(strip $(AIM_RENDER_OUTPUT_DIR)),--output-dir "$(AIM_RENDER_OUTPUT_DIR)")
+
+aim-prepare-render-blend:
+	$(BLENDER) --background $(AIM_RENDER_BLEND) \
+		--python scripts/aim_prepare_render_blend.py -- \
+		--preset $(AIM_RENDER_PRESET) \
+		--run $(AIM_RENDER_READY_RUN) \
+		$(if $(strip $(AIM_RENDER_READY_BLEND)),--output "$(AIM_RENDER_READY_BLEND)") \
+		$(if $(strip $(AIM_RENDER_READY_OUTPUT)),--render-output "$(AIM_RENDER_READY_OUTPUT)") \
+		$(if $(filter 0 false no,$(AIM_RENDER_READY_PACK)),--no-pack-resources)
 
 aim-clean-generated:
 	rm -f $(AIM_RENDER_DOPING)

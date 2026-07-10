@@ -5,7 +5,7 @@ Build a Blender scene from an AIM visual GDS.
 Run from Blender, for example:
 
   blender --background --python scripts/aim_build_blender_scene.py -- \
-    --gds examples/aim_custom_tx_cell_undercut/visual/tx_array_checkered.visual.gds
+    --gds examples/aim/visual/tx_array_checkered.visual.gds
 
 This script intentionally owns the Blender-side modeling/post-processing flow:
 BlenderGDS does the GDS extrusion, then this script fixes AIM-specific scene
@@ -27,7 +27,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_GDS = (
     REPO_ROOT
-    / "examples/aim_custom_tx_cell_undercut/visual/tx_array_checkered.visual.gds"
+    / "examples/aim/visual/tx_array_checkered.visual.gds"
 )
 DEFAULT_STACK_CONFIG = REPO_ROOT / "configs/blender/aim.yaml"
 DEFAULT_COLOR_CONFIG = REPO_ROOT / "configs/blender/colors/aim/realistic.yaml"

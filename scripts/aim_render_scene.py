@@ -200,6 +200,29 @@ def resolve_layer_objects(scene: Any, layer_name: str) -> list[Any]:
     ]
 
 
+def resolve_run_layer_objects(scene: Any, run: dict[str, Any]) -> dict[str, list[Any]]:
+    """Resolve and validate every render layer referenced by one preset run."""
+    resolved: dict[str, list[Any]] = {}
+    for layer_name in run["hide_layers"]:
+        objects = resolve_layer_objects(scene, layer_name)
+        if not objects:
+            raise ValueError(f"Preset layer {layer_name} is not present in the scene")
+        resolved[layer_name] = objects
+    return resolved
+
+
+def apply_run_visibility(
+    run: dict[str, Any], resolved_layers: dict[str, list[Any]]
+) -> list[str]:
+    """Apply one run's render visibility and return the hidden object names."""
+    hidden_objects: list[str] = []
+    for layer_name in run["hide_layers"]:
+        for obj in resolved_layers[layer_name]:
+            obj.hide_render = True
+            hidden_objects.append(obj.name)
+    return hidden_objects
+
+
 def select_runs(
     runs: list[dict[str, Any]], requested_names: list[str]
 ) -> list[dict[str, Any]]:
@@ -294,15 +317,8 @@ def render_preset(args: argparse.Namespace) -> None:
 
     resolved_layers: dict[str, list[Any]] = {}
     for run in runs:
-        for layer_name in run["hide_layers"]:
-            if layer_name in resolved_layers:
-                continue
-            objects = resolve_layer_objects(scene, layer_name)
-            if not objects:
-                raise ValueError(
-                    f"Preset layer {layer_name} is not present in {bpy.data.filepath}"
-                )
-            resolved_layers[layer_name] = objects
+        for layer_name, objects in resolve_run_layer_objects(scene, run).items():
+            resolved_layers.setdefault(layer_name, objects)
 
     output_dir = resolve_output_directory(preset, args.output_dir)
     if not args.dry_run:
@@ -315,11 +331,7 @@ def render_preset(args: argparse.Namespace) -> None:
         for run in runs:
             for obj, hidden in baseline_visibility.items():
                 obj.hide_render = hidden
-            hidden_objects: list[str] = []
-            for layer_name in run["hide_layers"]:
-                for obj in resolved_layers[layer_name]:
-                    obj.hide_render = True
-                    hidden_objects.append(obj.name)
+            hidden_objects = apply_run_visibility(run, resolved_layers)
 
             filename = (
                 f"{blend_stem}.{preset['name']}.{run['name']}{extension}"
