@@ -724,6 +724,22 @@ def apply_cladding_boolean(
     modifier.operation = "DIFFERENCE"
     modifier.object = cutter
 
+    # Polygon fracturing keeps GDS records/imports manageable, but it also makes
+    # the cutter a compound mesh of many prisms that touch along shared faces.
+    # Blender's Exact solver can interpret that self-touching operand as its
+    # complement and remove the entire cladding volume.  The floating-point
+    # solver handles this operand correctly.  Blender 5 renamed FAST to FLOAT,
+    # so select whichever spelling the running version exposes.
+    solver_identifiers = {
+        item.identifier
+        for item in modifier.bl_rna.properties["solver"].enum_items
+    }
+    if "FLOAT" in solver_identifiers:
+        modifier.solver = "FLOAT"
+    elif "FAST" in solver_identifiers:
+        modifier.solver = "FAST"
+    print(f"Cladding boolean solver: {modifier.solver}")
+
     if apply_modifier:
         bpy.ops.object.modifier_apply(modifier=modifier.name)
         print(f"Applied cladding boolean modifier: {cutter.name} -> {target.name}")

@@ -3,13 +3,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 version: 1
-name: trx_top_oblique_100mm
+name: tx_array_coaxial_oblique_100mm
 
 camera:
   object: Camera
   type: PERSP
-  location: [6050.0, 50.0, 10000.0]
-  rotation_degrees: [29.527, 0.000012, 32.57]
+  location: [183.08, -280.0, 413.32]
+  rotation_degrees: [27.927, 0.000008, -21.83]
   lens_mm: 100.0
 
 render:
@@ -21,7 +21,7 @@ render:
   file_format: PNG
 
 output:
-  directory: examples/aim/blender/renders/trx_top
+  directory: examples/aim/blender/renders/tx_array_coaxial
 
 runs:
   - name: no_backend_or_cladding
