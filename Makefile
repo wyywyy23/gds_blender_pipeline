@@ -18,6 +18,8 @@ AIM_BLENDER_DELETE_LAYERS ?=
 AIM_BLENDER_Z_SCALE ?= 1.0
 AIM_BLENDER_CAMERA_FIT_MARGIN ?= 1.10
 AIM_BLENDER_CLADDING_MODE ?= boolean
+AIM_PREPROCESS_MAX_POLYGON_VERTICES ?= 256
+AIM_BLENDER_MERGE_LAYERS ?= 0
 
 AIM_RENDER_BLEND ?= examples/aim/blender/trx_top.realistic.blend
 AIM_RENDER_PRESET ?= configs/blender/render_presets/trx_top_oblique_100mm.yaml
@@ -86,7 +88,8 @@ aim-preprocess-example: aim-registry aim-blendergds-config
 	conda run -n $(ENV_NAME) python scripts/aim_preprocess_gds.py \
 		--input $(EXAMPLE_GDS) \
 		--registry $(AIM_LAYER_REGISTRY) \
-		--output $(EXAMPLE_VISUAL_GDS)
+		--output $(EXAMPLE_VISUAL_GDS) \
+		--max-polygon-vertices $(AIM_PREPROCESS_MAX_POLYGON_VERTICES)
 
 aim-preprocess-all-examples: aim-registry aim-blendergds-config
 	mkdir -p $(EXAMPLE_VISUAL_DIR)
@@ -97,7 +100,8 @@ aim-preprocess-all-examples: aim-registry aim-blendergds-config
 		conda run -n $(ENV_NAME) python scripts/aim_preprocess_gds.py \
 			--input "$$gds" \
 			--registry $(AIM_LAYER_REGISTRY) \
-			--output "$$out"; \
+			--output "$$out" \
+			--max-polygon-vertices $(AIM_PREPROCESS_MAX_POLYGON_VERTICES); \
 	done
 
 aim-blender-scene-example: aim-preprocess-example
@@ -120,6 +124,7 @@ aim-blender-scene-example: aim-preprocess-example
 			--z-scale $(AIM_BLENDER_Z_SCALE) \
 			--camera-fit-margin $(AIM_BLENDER_CAMERA_FIT_MARGIN) \
 			--cladding-mode $(AIM_BLENDER_CLADDING_MODE) \
+			$(if $(filter 0 false no,$(AIM_BLENDER_MERGE_LAYERS)),--no-merge-layers) \
 			$(if $(strip $(AIM_BLENDER_DELETE_LAYERS)),--delete-layers "$(AIM_BLENDER_DELETE_LAYERS)"); \
 	done
 

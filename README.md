@@ -209,7 +209,8 @@ build the layout:
 conda run -n gds-blender-pipeline python scripts/aim_preprocess_gds.py \
   --input examples/my_case/raw/my_cell.gds \
   --registry configs/aim/layer_registry.local.yaml \
-  --output examples/my_case/visual/my_cell.visual.gds
+  --output examples/my_case/visual/my_cell.visual.gds \
+  --max-polygon-vertices 256
 
 blender --background --python scripts/aim_build_blender_scene.py -- \
   --gds examples/my_case/visual/my_cell.visual.gds \
@@ -218,7 +219,8 @@ blender --background --python scripts/aim_build_blender_scene.py -- \
   --output examples/my_case/blender/my_cell.realistic.blend \
   --z-scale 1 \
   --camera-fit-margin 1.10 \
-  --cladding-mode boolean
+  --cladding-mode boolean \
+  --no-merge-layers
 ```
 
 Inputs:
@@ -339,7 +341,8 @@ blender --background --python scripts/aim_build_blender_scene.py -- \
   --gds examples/my_case/visual/my_cell.visual.gds \
   --stack-config configs/blender/aim.yaml \
   --color-config configs/blender/colors/aim/realistic.yaml \
-  --output examples/my_case/blender/my_cell.realistic.blend
+  --output examples/my_case/blender/my_cell.realistic.blend \
+  --no-merge-layers
 ```
 
 The builder removes PN-conflict debug objects by default, applies materials,

@@ -271,6 +271,67 @@ def count_region_polygons(region: kdb.Region) -> int:
     return sum(1 for _ in region.each())
 
 
+def max_region_polygon_vertices(region: kdb.Region) -> int:
+    return max((polygon.num_points() for polygon in region.each()), default=0)
+
+
+def fracture_output_regions(
+    c_out: gf.Component,
+    *,
+    layers: list[tuple[int, int]],
+    max_polygon_vertices: int,
+) -> dict[str, int]:
+    """Split oversized output polygons before GDS export.
+
+    BlenderGDS triangulates each GDS boundary during import. Bounding individual
+    polygon complexity prevents large merged regions from causing quadratic
+    triangulation memory growth while preserving the union of each layer.
+    """
+    if max_polygon_vertices < 4:
+        raise ValueError("max_polygon_vertices must be at least 4")
+
+    stats = {
+        "layers": 0,
+        "polygons_before": 0,
+        "polygons_after": 0,
+        "max_vertices_before": 0,
+        "max_vertices_after": 0,
+    }
+
+    for layer in sorted(set(layers)):
+        region = region_for_layer(c_out, layer)
+        if region.is_empty():
+            continue
+
+        polygons_before = count_region_polygons(region)
+        max_vertices_before = max_region_polygon_vertices(region)
+        region.break_polygons(max_polygon_vertices, 0.0)
+        polygons_after = count_region_polygons(region)
+        max_vertices_after = max_region_polygon_vertices(region)
+        if max_vertices_after > max_polygon_vertices:
+            raise RuntimeError(
+                f"Could not fracture layer {layer} to at most "
+                f"{max_polygon_vertices} vertices: {max_vertices_after}"
+            )
+
+        layer_index = c_out.kcl.layout.layer(*layer)
+        shapes = c_out.kdb_cell.shapes(layer_index)
+        shapes.clear()
+        shapes.insert(region)
+
+        stats["layers"] += 1
+        stats["polygons_before"] += polygons_before
+        stats["polygons_after"] += polygons_after
+        stats["max_vertices_before"] = max(
+            stats["max_vertices_before"], max_vertices_before
+        )
+        stats["max_vertices_after"] = max(
+            stats["max_vertices_after"], max_vertices_after
+        )
+
+    return stats
+
+
 def region_for_layer(c: gf.Component, layer: tuple[int, int]) -> kdb.Region:
     return c.get_region(layer, merge=True).merged()
 
@@ -786,6 +847,7 @@ def preprocess_aim_gds(
     output_gds: str | Path,
     *,
     bbox_margin_override: float | None = None,
+    max_polygon_vertices: int | None = None,
     show: bool = False,
 ) -> gf.Component:
     ensure_active_pdk()
@@ -905,6 +967,14 @@ def preprocess_aim_gds(
         },
     )
 
+    fracture_stats = None
+    if max_polygon_vertices is not None:
+        fracture_stats = fracture_output_regions(
+            c_out,
+            layers=[get_layer(render_layers, name) for name in render_layers],
+            max_polygon_vertices=max_polygon_vertices,
+        )
+
     output_gds = Path(output_gds)
     output_gds.parent.mkdir(parents=True, exist_ok=True)
     c_out.write_gds(str(output_gds))
@@ -949,6 +1019,15 @@ def preprocess_aim_gds(
         f"{static_expression_stats['empty']} empty, "
         f"{static_expression_stats['candidate']} total"
     )
+    if fracture_stats is not None:
+        print(
+            "Fractured output polygons: "
+            f"{fracture_stats['polygons_before']} -> "
+            f"{fracture_stats['polygons_after']} across "
+            f"{fracture_stats['layers']} non-empty layers; "
+            f"max vertices {fracture_stats['max_vertices_before']} -> "
+            f"{fracture_stats['max_vertices_after']}"
+        )
 
     if show:
         c_out.show()
@@ -967,6 +1046,15 @@ def main() -> None:
         "--bbox-margin", type=float, default=None, help="Override bbox margin in um"
     )
     parser.add_argument(
+        "--max-polygon-vertices",
+        type=int,
+        default=None,
+        help=(
+            "Fracture output polygons to at most this many vertices before "
+            "writing GDS"
+        ),
+    )
+    parser.add_argument(
         "--show",
         action="store_true",
         help="Open output component in KLayout via gdsfactory",
@@ -978,6 +1066,7 @@ def main() -> None:
         registry_yaml=args.registry,
         output_gds=args.output,
         bbox_margin_override=args.bbox_margin,
+        max_polygon_vertices=args.max_polygon_vertices,
         show=args.show,
     )
 
