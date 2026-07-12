@@ -15,6 +15,7 @@ details, applies AIM-specific booleans/materials, and saves the .blend artifact.
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 from itertools import product
 from pathlib import Path
 import sys
@@ -33,6 +34,7 @@ DEFAULT_STACK_CONFIG = REPO_ROOT / "configs/blender/aim.yaml"
 DEFAULT_COLOR_CONFIG = REPO_ROOT / "configs/blender/colors/aim/realistic.yaml"
 CLADDING_LAYER = "CLADDING_RENDER"
 CLADDING_CUTTER_LAYER = "CLADDING_UNDERCUT_CUTTER_RENDER"
+CLADDING_BOOLEAN_BATCH_PREFIX = "CladdingBooleanBatch"
 CLADDING_MODES = ("boolean", "solid", "omit")
 
 
@@ -694,6 +696,127 @@ def recalculate_mesh_normals(obj: Any) -> None:
     print(f"Recalculated mesh normals: {obj.name}")
 
 
+def mesh_component_labels(mesh: Any) -> tuple[list[int], int]:
+    adjacency: list[list[int]] = [[] for _ in mesh.vertices]
+    for edge in mesh.edges:
+        first, second = edge.vertices
+        adjacency[first].append(second)
+        adjacency[second].append(first)
+
+    labels = [-1] * len(mesh.vertices)
+    component_count = 0
+    for seed in range(len(mesh.vertices)):
+        if labels[seed] != -1:
+            continue
+        labels[seed] = component_count
+        stack = [seed]
+        while stack:
+            current = stack.pop()
+            for neighbor in adjacency[current]:
+                if labels[neighbor] == -1:
+                    labels[neighbor] = component_count
+                    stack.append(neighbor)
+        component_count += 1
+
+    return labels, component_count
+
+
+def color_touching_mesh_components(
+    cutter: Any,
+    labels: list[int],
+    component_count: int,
+    *,
+    tolerance: float = 1.0e-4,
+) -> list[int]:
+    coordinate_components: dict[tuple[int, int], set[int]] = defaultdict(set)
+    for vertex in cutter.data.vertices:
+        world_co = cutter.matrix_world @ vertex.co
+        coordinate = (
+            round(world_co.x / tolerance),
+            round(world_co.y / tolerance),
+        )
+        coordinate_components[coordinate].add(labels[vertex.index])
+
+    neighbors = [set() for _ in range(component_count)]
+    for components_at_coordinate in coordinate_components.values():
+        components = tuple(components_at_coordinate)
+        for index, first in enumerate(components):
+            for second in components[index + 1 :]:
+                neighbors[first].add(second)
+                neighbors[second].add(first)
+
+    colors = [-1] * component_count
+    order = sorted(
+        range(component_count),
+        key=lambda component: len(neighbors[component]),
+        reverse=True,
+    )
+    for component in order:
+        unavailable = {
+            colors[neighbor]
+            for neighbor in neighbors[component]
+            if colors[neighbor] >= 0
+        }
+        color = 0
+        while color in unavailable:
+            color += 1
+        colors[component] = color
+
+    return colors
+
+
+def create_cladding_boolean_batches(
+    bpy: Any,
+    *,
+    cutter: Any,
+) -> list[Any]:
+    labels, component_count = mesh_component_labels(cutter.data)
+    if component_count == 0:
+        raise RuntimeError(f"Cladding cutter has no mesh components: {cutter.name}")
+
+    colors = color_touching_mesh_components(cutter, labels, component_count)
+    batch_count = max(colors) + 1
+    batches = []
+
+    for color in range(batch_count):
+        old_to_new: dict[int, int] = {}
+        coordinates = []
+        faces = []
+        for polygon in cutter.data.polygons:
+            polygon_vertices = tuple(polygon.vertices)
+            component = labels[polygon_vertices[0]]
+            if colors[component] != color:
+                continue
+
+            face = []
+            for old_index in polygon_vertices:
+                new_index = old_to_new.get(old_index)
+                if new_index is None:
+                    new_index = len(coordinates)
+                    old_to_new[old_index] = new_index
+                    coordinates.append(cutter.data.vertices[old_index].co.copy())
+                face.append(new_index)
+            faces.append(face)
+
+        name = f"{CLADDING_BOOLEAN_BATCH_PREFIX}{color + 1:02d}"
+        mesh = bpy.data.meshes.new(name)
+        mesh.from_pydata(coordinates, [], faces)
+        mesh.update()
+        batch = bpy.data.objects.new(name, mesh)
+        cutter.users_collection[0].objects.link(batch)
+        batch.matrix_world = cutter.matrix_world.copy()
+        batch.hide_viewport = True
+        batch.hide_render = True
+        batches.append(batch)
+
+    sizes = [colors.count(color) for color in range(batch_count)]
+    print(
+        "Split cladding cutter into non-touching boolean batches: "
+        f"{component_count} components -> {batch_count} batches {sizes}"
+    )
+    return batches
+
+
 def apply_cladding_boolean(
     bpy: Any,
     *,
@@ -713,40 +836,45 @@ def apply_cladding_boolean(
     extend_cutter_z_through_target(bpy, cutter=cutter, target=target)
     recalculate_mesh_normals(target)
     recalculate_mesh_normals(cutter)
+    batches = create_cladding_boolean_batches(bpy, cutter=cutter)
 
     bpy.ops.object.select_all(action="DESELECT")
     target.select_set(True)
     bpy.context.view_layer.objects.active = target
 
-    bpy.ops.object.modifier_add(type="BOOLEAN")
-    modifier = target.modifiers[len(target.modifiers) - 1]
-    modifier.name = "Cladding_Undercut"
-    modifier.operation = "DIFFERENCE"
-    modifier.object = cutter
-
     # Polygon fracturing keeps GDS records/imports manageable, but it also makes
-    # the cutter a compound mesh of many prisms that touch along shared faces.
-    # Blender's Exact solver can interpret that self-touching operand as its
-    # complement and remove the entire cladding volume.  The floating-point
-    # solver handles this operand correctly.  Blender 5 renamed FAST to FLOAT,
-    # so select whichever spelling the running version exposes.
-    solver_identifiers = {
-        item.identifier
-        for item in modifier.bl_rna.properties["solver"].enum_items
-    }
-    if "FLOAT" in solver_identifiers:
-        modifier.solver = "FLOAT"
-    elif "FAST" in solver_identifiers:
-        modifier.solver = "FAST"
-    print(f"Cladding boolean solver: {modifier.solver}")
-
-    if apply_modifier:
-        bpy.ops.object.modifier_apply(modifier=modifier.name)
-        print(f"Applied cladding boolean modifier: {cutter.name} -> {target.name}")
-    else:
+    # the cutter a compound mesh of closed prisms. Some prisms touch at shared
+    # edges or points, and a single Boolean operand is unreliable: Exact can
+    # remove the entire target, Float can produce a non-manifold mesh, and
+    # Manifold can silently leave some cutter islands filled. Graph-color the
+    # touching components into non-touching batches, then subtract each batch
+    # with a live Exact modifier.
+    for index, batch in enumerate(batches, start=1):
+        modifier = target.modifiers.new(f"Cladding_Undercut_{index:02d}", "BOOLEAN")
+        modifier.operation = "DIFFERENCE"
+        modifier.object = batch
+        modifier.solver = "EXACT"
         modifier.show_viewport = True
         modifier.show_render = True
-        print(f"Added live cladding boolean modifier: {cutter.name} -> {target.name}")
+
+        if apply_modifier:
+            bpy.ops.object.modifier_apply(modifier=modifier.name)
+
+    if apply_modifier:
+        for batch in batches:
+            mesh = batch.data
+            bpy.data.objects.remove(batch, do_unlink=True)
+            if mesh.users == 0:
+                bpy.data.meshes.remove(mesh)
+        print(
+            f"Applied {len(batches)} cladding boolean modifiers: "
+            f"{cutter.name} -> {target.name}"
+        )
+    else:
+        print(
+            f"Added {len(batches)} live Exact cladding boolean modifiers: "
+            f"{cutter.name} -> {target.name}"
+        )
 
     if show_cutter:
         print(f"Kept cladding cutter visible: {cutter.name}")
