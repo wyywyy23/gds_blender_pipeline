@@ -293,7 +293,7 @@ conda run -n gds-blender-pipeline python scripts/aim_generate_blendergds_config.
 Preprocessing flattens the input GDS, generates substrate and cladding regions,
 resolves silicon doping into explicit render layers, writes PN-conflict debug
 layers, and copies static expression layers such as waveguides, contacts, vias,
-metals, and black-box proxies.
+metals, black-box proxies, and the PAAM passivation-opening cutter.
 
 ### With Make
 
@@ -547,10 +547,18 @@ Choose a cladding mode with `--cladding-mode` or
 `AIM_BLENDER_CLADDING_MODE`:
 
 ```text
-boolean  Import cladding and cutter, then add the opening Boolean (default).
-solid    Import solid, uncut cladding without importing the cutter.
-omit     Import neither cladding nor cutter.
+boolean  Import cladding and both cutters, then add the opening Booleans (default).
+solid    Import solid, uncut cladding without importing either cutter.
+omit     Import neither cladding nor its cutters.
 ```
+
+The cladding extends from `z = -2.000 um` through a `0.500 um` passivation cap
+above the MLAM top, ending at `z = 5.980 um`. The full-height TUAM-derived
+undercut cutter opens the cladding down through the BOX. A separate cutter copied
+from raw PAAM opens only the passivation cap: it spans `z = 5.479` to
+`5.981 um`, providing a `0.001 um` Boolean overlap below the MLAM top and above
+the cladding surface. This avoids coincident cladding/MLAM top faces while
+exposing top metal only inside PAAM.
 
 For example:
 

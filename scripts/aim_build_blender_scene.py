@@ -33,8 +33,12 @@ DEFAULT_GDS = (
 DEFAULT_STACK_CONFIG = REPO_ROOT / "configs/blender/aim.yaml"
 DEFAULT_COLOR_CONFIG = REPO_ROOT / "configs/blender/colors/aim/realistic.yaml"
 CLADDING_LAYER = "CLADDING_RENDER"
-CLADDING_CUTTER_LAYER = "CLADDING_UNDERCUT_CUTTER_RENDER"
-CLADDING_BOOLEAN_BATCH_PREFIX = "CladdingBooleanBatch"
+CLADDING_UNDERCUT_CUTTER_LAYER = "CLADDING_UNDERCUT_CUTTER_RENDER"
+CLADDING_PASSIVATION_CUTTER_LAYER = "CLADDING_PASSIVATION_CUTTER_RENDER"
+CLADDING_CUTTER_LAYERS = (
+    CLADDING_UNDERCUT_CUTTER_LAYER,
+    CLADDING_PASSIVATION_CUTTER_LAYER,
+)
 CLADDING_MODES = ("boolean", "solid", "omit")
 
 
@@ -158,9 +162,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         choices=CLADDING_MODES,
         default="boolean",
         help=(
-            "Cladding handling: boolean imports cladding and cutter and adds the "
-            "opening Boolean; solid imports only uncut cladding; omit imports "
-            "neither cladding layer (default: boolean)"
+            "Cladding handling: boolean imports cladding and its TUAM/PAAM "
+            "cutters and adds the opening Booleans; solid imports only uncut "
+            "cladding; omit imports neither cladding nor cutters (default: boolean)"
         ),
     )
     parser.add_argument(
@@ -171,12 +175,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--show-cladding-cutter",
         action="store_true",
-        help="Keep the cladding cutter visible after the boolean operation",
+        help="Keep the TUAM and PAAM cladding cutters visible after the booleans",
     )
     parser.add_argument(
         "--apply-cladding-boolean",
         action="store_true",
-        help="Apply the cladding boolean destructively instead of keeping a live modifier",
+        help=(
+            "Apply the cladding booleans destructively instead of keeping live "
+            "modifiers"
+        ),
     )
     parser.add_argument(
         "--keep-pn-conflicts",
@@ -251,9 +258,9 @@ def excluded_cladding_layers(mode: str) -> set[str]:
     if mode == "boolean":
         return set()
     if mode == "solid":
-        return {CLADDING_CUTTER_LAYER}
+        return set(CLADDING_CUTTER_LAYERS)
     if mode == "omit":
-        return {CLADDING_LAYER, CLADDING_CUTTER_LAYER}
+        return {CLADDING_LAYER, *CLADDING_CUTTER_LAYERS}
     raise ValueError(f"Unknown cladding mode: {mode}")
 
 
@@ -769,6 +776,7 @@ def create_cladding_boolean_batches(
     bpy: Any,
     *,
     cutter: Any,
+    batch_prefix: str,
 ) -> list[Any]:
     labels, component_count = mesh_component_labels(cutter.data)
     if component_count == 0:
@@ -798,7 +806,7 @@ def create_cladding_boolean_batches(
                 face.append(new_index)
             faces.append(face)
 
-        name = f"{CLADDING_BOOLEAN_BATCH_PREFIX}{color + 1:02d}"
+        name = f"{batch_prefix}{color + 1:02d}"
         mesh = bpy.data.meshes.new(name)
         mesh.from_pydata(coordinates, [], faces)
         mesh.update()
@@ -811,46 +819,61 @@ def create_cladding_boolean_batches(
 
     sizes = [colors.count(color) for color in range(batch_count)]
     print(
-        "Split cladding cutter into non-touching boolean batches: "
+        f"Split {cutter.name} into non-touching boolean batches: "
         f"{component_count} components -> {batch_count} batches {sizes}"
     )
     return batches
 
 
-def apply_cladding_boolean(
+def validate_bounded_cutter_crosses_target_top(*, cutter: Any, target: Any) -> None:
+    target_zmin, target_zmax = object_world_z_bounds(target)
+    cutter_zmin, cutter_zmax = object_world_z_bounds(cutter)
+    if not target_zmin < cutter_zmin < target_zmax < cutter_zmax:
+        raise RuntimeError(
+            f"Bounded cladding cutter {cutter.name} must start inside "
+            f"{target.name} and end above it: cutter=[{cutter_zmin:.6f}, "
+            f"{cutter_zmax:.6f}], target=[{target_zmin:.6f}, {target_zmax:.6f}]"
+        )
+    print(
+        "Validated bounded cladding cutter z-range: "
+        f"{cutter.name} [{cutter_zmin:.3f}, {cutter_zmax:.3f}] crosses "
+        f"{target.name} top at {target_zmax:.3f}"
+    )
+
+
+def remove_boolean_batches(bpy: Any, batches: list[Any]) -> None:
+    for batch in batches:
+        mesh = batch.data
+        bpy.data.objects.remove(batch, do_unlink=True)
+        if mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+
+
+def add_cladding_cutter_boolean(
     bpy: Any,
     *,
-    show_cutter: bool,
+    target: Any,
+    cutter: Any,
+    modifier_prefix: str,
+    batch_prefix: str,
     apply_modifier: bool,
-) -> bool:
-    target = find_imported_layer_object(bpy, CLADDING_LAYER)
-    cutter = find_imported_layer_object(bpy, CLADDING_CUTTER_LAYER)
-
-    if target is None:
-        print("Skipping cladding boolean: LCLADDING_RENDER not found")
-        return False
-    if cutter is None:
-        print("Skipping cladding boolean: LCLADDING_UNDERCUT_CUTTER_RENDER not found")
-        return False
-
-    extend_cutter_z_through_target(bpy, cutter=cutter, target=target)
-    recalculate_mesh_normals(target)
+) -> int:
     recalculate_mesh_normals(cutter)
-    batches = create_cladding_boolean_batches(bpy, cutter=cutter)
-
-    bpy.ops.object.select_all(action="DESELECT")
-    target.select_set(True)
-    bpy.context.view_layer.objects.active = target
+    batches = create_cladding_boolean_batches(
+        bpy,
+        cutter=cutter,
+        batch_prefix=batch_prefix,
+    )
 
     # Polygon fracturing keeps GDS records/imports manageable, but it also makes
-    # the cutter a compound mesh of closed prisms. Some prisms touch at shared
+    # each cutter a compound mesh of closed prisms. Some prisms touch at shared
     # edges or points, and a single Boolean operand is unreliable: Exact can
     # remove the entire target, Float can produce a non-manifold mesh, and
     # Manifold can silently leave some cutter islands filled. Graph-color the
     # touching components into non-touching batches, then subtract each batch
     # with a live Exact modifier.
     for index, batch in enumerate(batches, start=1):
-        modifier = target.modifiers.new(f"Cladding_Undercut_{index:02d}", "BOOLEAN")
+        modifier = target.modifiers.new(f"{modifier_prefix}_{index:02d}", "BOOLEAN")
         modifier.operation = "DIFFERENCE"
         modifier.object = batch
         modifier.solver = "EXACT"
@@ -861,11 +884,7 @@ def apply_cladding_boolean(
             bpy.ops.object.modifier_apply(modifier=modifier.name)
 
     if apply_modifier:
-        for batch in batches:
-            mesh = batch.data
-            bpy.data.objects.remove(batch, do_unlink=True)
-            if mesh.users == 0:
-                bpy.data.meshes.remove(mesh)
+        remove_boolean_batches(bpy, batches)
         print(
             f"Applied {len(batches)} cladding boolean modifiers: "
             f"{cutter.name} -> {target.name}"
@@ -876,14 +895,76 @@ def apply_cladding_boolean(
             f"{cutter.name} -> {target.name}"
         )
 
-    if show_cutter:
-        print(f"Kept cladding cutter visible: {cutter.name}")
-    else:
-        cutter.hide_viewport = True
-        cutter.hide_render = True
-        print(f"Hid cladding cutter object: {cutter.name}")
+    return len(batches)
 
-    return True
+
+def apply_cladding_boolean(
+    bpy: Any,
+    *,
+    show_cutter: bool,
+    apply_modifier: bool,
+) -> bool:
+    target = find_imported_layer_object(bpy, CLADDING_LAYER)
+
+    if target is None:
+        print("Skipping cladding boolean: LCLADDING_RENDER not found")
+        return False
+
+    bpy.ops.object.select_all(action="DESELECT")
+    target.select_set(True)
+    bpy.context.view_layer.objects.active = target
+    recalculate_mesh_normals(target)
+
+    cutter_specs = (
+        {
+            "layer": CLADDING_UNDERCUT_CUTTER_LAYER,
+            "modifier_prefix": "Cladding_Undercut",
+            "batch_prefix": "CladdingUndercutBatch",
+            "extend_through_target": True,
+        },
+        {
+            "layer": CLADDING_PASSIVATION_CUTTER_LAYER,
+            "modifier_prefix": "Cladding_Passivation",
+            "batch_prefix": "CladdingPassivationBatch",
+            "extend_through_target": False,
+        },
+    )
+    applied_cutters = 0
+    applied_modifiers = 0
+
+    for spec in cutter_specs:
+        cutter = find_imported_layer_object(bpy, spec["layer"])
+        if cutter is None:
+            print(f"Skipping cladding cutter not present in scene: L{spec['layer']}")
+            continue
+
+        if spec["extend_through_target"]:
+            extend_cutter_z_through_target(bpy, cutter=cutter, target=target)
+        else:
+            validate_bounded_cutter_crosses_target_top(cutter=cutter, target=target)
+
+        applied_modifiers += add_cladding_cutter_boolean(
+            bpy,
+            target=target,
+            cutter=cutter,
+            modifier_prefix=spec["modifier_prefix"],
+            batch_prefix=spec["batch_prefix"],
+            apply_modifier=apply_modifier,
+        )
+        applied_cutters += 1
+
+        if show_cutter:
+            print(f"Kept cladding cutter visible: {cutter.name}")
+        else:
+            cutter.hide_viewport = True
+            cutter.hide_render = True
+            print(f"Hid cladding cutter object: {cutter.name}")
+
+    print(
+        f"Cladding Boolean summary: {applied_cutters} cutters, "
+        f"{applied_modifiers} modifiers"
+    )
+    return applied_cutters > 0
 
 
 def remove_pn_conflict_debug_objects(bpy: Any) -> int:

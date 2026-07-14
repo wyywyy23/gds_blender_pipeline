@@ -14,12 +14,13 @@ Current functionality:
   - Generate cladding render regions:
       CLADDING_RENDER minus DIAM
       CLADDING_UNDERCUT_CUTTER_RENDER
+      CLADDING_PASSIVATION_CUTTER_RENDER copied from PAAM
   - Generate silicon render regions from doping rules:
       intrinsic silicon
       doped silicon
       PN conflict debug
   - Copy remaining static expression layers:
-      nitride, contact, vias, metals, PDK black box
+      passivation cutter, nitride, contact, vias, metals, PDK black box
   - Write output visual/render GDS.
 """
 

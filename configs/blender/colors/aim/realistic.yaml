@@ -33,6 +33,13 @@ layers:
     Roughness: 0.35
     Metallic: 0.0
 
+  # Hidden after the bounded PAAM passivation-opening Boolean.
+  CLADDING_PASSIVATION_CUTTER_RENDER:
+    Base Color: [0.15, 0.75, 0.30, 0.28]
+    Alpha: 0.28
+    Roughness: 0.35
+    Metallic: 0.0
+
   # Silicon render layers. Doping polarity and rank are intentionally subtle;
   # the geometry carries the stack information, while the color remains realistic.
   SEAM_I_BOTTOM_RENDER: &silicon_intrinsic

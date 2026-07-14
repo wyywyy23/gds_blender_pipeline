@@ -28,6 +28,13 @@ layers:
     Roughness: 0.65
     Metallic: 0.0
 
+  # Hidden after the bounded PAAM passivation-opening Boolean.
+  CLADDING_PASSIVATION_CUTTER_RENDER:
+    Base Color: [0.10, 1.0, 0.35, 0.42]
+    Alpha: 0.42
+    Roughness: 0.55
+    Metallic: 0.0
+
   # Silicon: light intrinsic, blue n-type ladder, red p-type ladder.
   SEAM_I_BOTTOM_RENDER: &silicon_intrinsic
     Base Color: [0.86, 0.88, 0.86, 1.0]
