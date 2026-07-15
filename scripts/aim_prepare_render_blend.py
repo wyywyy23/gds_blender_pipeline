@@ -14,6 +14,8 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from aim_render_scene import (
     apply_camera,
+    apply_color_management,
+    apply_lighting,
     apply_render_settings,
     apply_run_visibility,
     blender_argv,
@@ -120,6 +122,8 @@ def prepare_render_blend(args: argparse.Namespace) -> None:
     scene = bpy.context.scene
     resolved_layers = resolve_run_layer_objects(scene, run)
     apply_camera(scene, preset["camera"])
+    apply_lighting(scene, preset["lighting"])
+    apply_color_management(scene, preset["color_management"])
     apply_render_settings(scene, preset["render"])
     hidden_objects = apply_run_visibility(run, resolved_layers)
 

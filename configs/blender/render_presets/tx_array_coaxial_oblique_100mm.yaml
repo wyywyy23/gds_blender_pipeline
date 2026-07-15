@@ -12,6 +12,15 @@ camera:
   rotation_degrees: [27.927, 0.000008, -21.83]
   lens_mm: 100.0
 
+lighting:
+  sun:
+    object: Sun
+    strength: 6.0
+
+color_management:
+  view_transform: AgX
+  look: AgX - High Contrast
+
 render:
   engine: CYCLES
   samples: 4096

@@ -352,8 +352,9 @@ camera settings.
 
 ## Workflow 4: Render Locally From A Preset
 
-A render preset stores the camera, Cycles settings, output directory, and one
-or more named layer-visibility runs. Presets live under:
+A render preset stores the camera, lighting, color management, Cycles settings,
+output directory, and one or more named layer-visibility runs. Presets live
+under:
 
 ```text
 configs/blender/render_presets/*.yaml
@@ -379,6 +380,15 @@ camera:
   location: [6050.0, 50.0, 10000.0]
   rotation_degrees: [29.527, 0.0, 32.57]
   lens_mm: 100.0
+
+lighting:
+  sun:
+    object: Sun
+    strength: 6.0
+
+color_management:
+  view_transform: AgX
+  look: AgX - High Contrast
 
 render:
   engine: CYCLES
@@ -459,7 +469,7 @@ create one prepared `.blend` per farm job variant.
 
 The prepared artifact contains:
 
-- Preset camera and Cycles settings.
+- Preset camera, lighting, color-management, and Cycles settings.
 - The selected run's `hide_render` state.
 - A portable render path under `//renders/` by default.
 - Packed external resources by default.

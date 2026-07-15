@@ -127,6 +127,42 @@ def load_preset(path: Path) -> dict[str, Any]:
     if camera["type"] != "PERSP":
         raise ValueError("Only PERSP camera presets are currently supported")
 
+    lighting_data = data.get("lighting")
+    lighting = None
+    if lighting_data is not None:
+        lighting_data = require_mapping(lighting_data, "lighting")
+        sun_data = require_mapping(lighting_data.get("sun"), "lighting.sun")
+        sun_object = sun_data.get("object", "Sun")
+        if not isinstance(sun_object, str) or not sun_object:
+            raise ValueError("lighting.sun.object must be a non-empty string")
+        lighting = {
+            "sun": {
+                "object": sun_object,
+                "strength": require_positive_number(
+                    sun_data.get("strength"), "lighting.sun.strength"
+                ),
+            }
+        }
+
+    color_management_data = data.get("color_management")
+    color_management = None
+    if color_management_data is not None:
+        color_management_data = require_mapping(
+            color_management_data, "color_management"
+        )
+        view_transform = color_management_data.get("view_transform")
+        look = color_management_data.get("look")
+        if not isinstance(view_transform, str) or not view_transform:
+            raise ValueError(
+                "color_management.view_transform must be a non-empty string"
+            )
+        if not isinstance(look, str) or not look:
+            raise ValueError("color_management.look must be a non-empty string")
+        color_management = {
+            "view_transform": view_transform,
+            "look": look,
+        }
+
     render_data = require_mapping(data.get("render"), "render")
     samples = render_data.get("samples")
     if isinstance(samples, bool) or not isinstance(samples, int) or samples <= 0:
@@ -179,6 +215,8 @@ def load_preset(path: Path) -> dict[str, Any]:
     return {
         "name": name,
         "camera": camera,
+        "lighting": lighting,
+        "color_management": color_management,
         "render": render,
         "output_directory": directory,
         "runs": runs,
@@ -269,6 +307,41 @@ def apply_camera(scene: Any, camera_config: dict[str, Any]) -> Any:
     return camera
 
 
+def apply_lighting(scene: Any, lighting_config: dict[str, Any] | None) -> None:
+    if lighting_config is None:
+        return
+
+    sun_config = lighting_config["sun"]
+    sun = scene.objects.get(sun_config["object"])
+    if sun is None or sun.type != "LIGHT" or sun.data.type != "SUN":
+        raise ValueError(f"Sun light object not found: {sun_config['object']}")
+    sun.data.energy = sun_config["strength"]
+    print(f"Lighting preset: sun={sun.name}, strength={sun.data.energy:g}")
+
+
+def apply_color_management(
+    scene: Any, color_management_config: dict[str, Any] | None
+) -> None:
+    if color_management_config is None:
+        return
+
+    view_transform = color_management_config["view_transform"]
+    look = color_management_config["look"]
+    try:
+        scene.view_settings.view_transform = view_transform
+        scene.view_settings.look = look
+    except TypeError as exc:
+        raise ValueError(
+            "Unsupported color-management setting: "
+            f"view_transform={view_transform}, look={look}"
+        ) from exc
+    print(
+        "Color management preset: "
+        f"view_transform={scene.view_settings.view_transform}, "
+        f"look={scene.view_settings.look}"
+    )
+
+
 def apply_render_settings(scene: Any, render_config: dict[str, Any]) -> None:
     scene.render.engine = render_config["engine"]
     scene.cycles.samples = render_config["samples"]
@@ -313,6 +386,8 @@ def render_preset(args: argparse.Namespace) -> None:
     runs = select_runs(preset["runs"], args.runs)
     scene = bpy.context.scene
     apply_camera(scene, preset["camera"])
+    apply_lighting(scene, preset["lighting"])
+    apply_color_management(scene, preset["color_management"])
     apply_render_settings(scene, preset["render"])
 
     resolved_layers: dict[str, list[Any]] = {}
