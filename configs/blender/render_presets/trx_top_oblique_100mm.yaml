@@ -23,7 +23,7 @@ color_management:
 
 render:
   engine: CYCLES
-  samples: 4096
+  samples: 1024
   denoise: false
   # Disable adaptive early termination so every pixel uses the requested count.
   adaptive_sampling: false
