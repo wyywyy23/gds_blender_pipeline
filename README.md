@@ -581,6 +581,16 @@ extrusion, which avoids creating expensive meshes for large layouts. The older
 `--no-cladding-boolean` flag remains a deprecated alias for
 `--cladding-mode solid`.
 
+The 256-point preprocessing limit remains in effect. The TUAM and PAAM cladding
+cutters are graph-colored into non-touching batches and subtracted with Exact
+Boolean modifiers. Use `--apply-cladding-boolean` to bake the same batched
+modifiers immediately. The Make equivalent is:
+
+```sh
+AIM_BLENDER_APPLY_CLADDING_BOOLEAN=1 \
+make aim-blender-scene-example
+```
+
 ### Removing Large Layers
 
 Remove additional imported layers from the saved `.blend` with repeated or
