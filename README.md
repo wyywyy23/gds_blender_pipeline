@@ -562,13 +562,15 @@ solid    Import solid, uncut cladding without importing either cutter.
 omit     Import neither cladding nor its cutters.
 ```
 
-The cladding extends from `z = -2.000 um` through a `0.500 um` passivation cap
-above the MLAM top, ending at `z = 5.980 um`. The full-height TUAM-derived
-undercut cutter opens the cladding down through the BOX. A separate cutter copied
-from raw PAAM opens only the passivation cap: it spans `z = 5.479` to
-`5.981 um`, providing a `0.001 um` Boolean overlap below the MLAM top and above
-the cladding surface. This avoids coincident cladding/MLAM top faces while
-exposing top metal only inside PAAM.
+The cladding extends from `z = -2.001 um` through a `0.500 um` passivation cap
+above the MLAM top, ending at `z = 5.980 um`. Its `0.001 um` render-only overlap
+into the substrate avoids a coincident cladding/substrate boundary and the
+resulting line-shaped render artifacts. The full-height TUAM-derived undercut
+cutter opens the cladding down through the BOX. A separate cutter copied from
+raw PAAM opens only the passivation cap: it spans `z = 5.479` to `5.981 um`,
+providing a `0.001 um` Boolean overlap below the MLAM top and above the cladding
+surface. This avoids coincident cladding/MLAM top faces while exposing top metal
+only inside PAAM.
 
 For example:
 
