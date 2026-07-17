@@ -153,33 +153,33 @@ layers:
 
   # Contacts: bright polished tungsten.
   CBAM_RENDER:
-    Base Color: [0.66, 0.68, 0.72, 1.0]
-    Metallic: 0.96
-    Roughness: 0.10
+    Base Color: [0.82, 0.84, 0.88, 1.0]
+    Metallic: 0.94
+    Roughness: 0.14
 
-  # Copper backend: bright polished silver with slight warmth.
+  # Copper backend: bright neutral silver for the marketing treatment.
   M1AM_RENDER:
-    Base Color: [0.84, 0.84, 0.82, 1.0]
-    Metallic: 0.96
-    Roughness: 0.10
+    Base Color: [0.93, 0.94, 0.96, 1.0]
+    Metallic: 0.94
+    Roughness: 0.14
   V1AM_RENDER:
-    Base Color: [0.78, 0.79, 0.78, 1.0]
-    Metallic: 0.96
-    Roughness: 0.11
+    Base Color: [0.88, 0.90, 0.93, 1.0]
+    Metallic: 0.94
+    Roughness: 0.15
   M2AM_RENDER:
-    Base Color: [0.90, 0.90, 0.88, 1.0]
-    Metallic: 0.96
-    Roughness: 0.09
+    Base Color: [0.97, 0.98, 1.0, 1.0]
+    Metallic: 0.94
+    Roughness: 0.12
 
-  # Aluminum backend: brighter polished platinum group.
+  # Aluminum backend: bright cool silver.
   VAAM_RENDER:
-    Base Color: [0.88, 0.89, 0.90, 1.0]
-    Metallic: 0.96
-    Roughness: 0.09
+    Base Color: [0.94, 0.96, 0.99, 1.0]
+    Metallic: 0.94
+    Roughness: 0.12
   MLAM_RENDER:
-    Base Color: [0.98, 0.98, 0.96, 1.0]
-    Metallic: 0.96
-    Roughness: 0.08
+    Base Color: [1.0, 1.0, 1.0, 1.0]
+    Metallic: 0.94
+    Roughness: 0.10
 
   PDK_BLACKBOX_RENDER:
     Base Color: [0.42, 0.43, 0.46, 0.58]
