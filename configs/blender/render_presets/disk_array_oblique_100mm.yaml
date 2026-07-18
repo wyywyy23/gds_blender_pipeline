@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+version: 1
+name: disk_array_oblique_100mm
+
+camera:
+  object: Camera
+  type: PERSP
+  location: [183.08, -280.0, 413.32]
+  rotation_degrees: [27.927, 0.000008, -21.83]
+  lens_mm: 100.0
+
+lighting:
+  sun:
+    object: Sun
+    strength: 5.0
+
+color_management:
+  view_transform: AgX
+  look: AgX - High Contrast
+
+render:
+  engine: CYCLES
+  samples: 1024
+  denoise: false
+  # Disable adaptive early termination so every pixel uses the requested count.
+  adaptive_sampling: false
+  file_format: PNG
+
+output:
+  directory: examples/aim/blender/renders/{example_name}
+
+runs:
+  - name: all_layers
+    hide_layers: []
