@@ -8,8 +8,8 @@ name: disk_array_oblique_100mm
 camera:
   object: Camera
   type: PERSP
-  location: [183.08, -280.0, 413.32]
-  rotation_degrees: [27.927, 0.000008, -21.83]
+  location: [247.5, -120, 18]
+  rotation_degrees: [70, 0, 0]
   lens_mm: 100.0
 
 lighting:
