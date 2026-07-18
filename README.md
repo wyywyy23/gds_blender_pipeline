@@ -360,11 +360,24 @@ under:
 configs/blender/render_presets/*.yaml
 ```
 
-The included `trx_top_oblique_100mm.yaml` defines these runs:
+The included `trx_top_oblique_100mm.yaml` and
+`disk_array_oblique_100mm.yaml` presets render only `all_layers`. The
+`disk_array_oblique_300mm.yaml` preset renders a cumulative backend sequence:
 
-- `no_backend_or_cladding`: hide CBAM, M1AM, V1AM, M2AM, VAAM, MLAM, and cladding.
-- `no_cladding`: hide only cladding.
-- `all_layers`: retain the source `.blend` file's baseline visibility.
+- `no_backend_or_cladding`
+- `through_cbam`
+- `through_m1am`
+- `through_v1am`
+- `through_m2am`
+- `through_vaam`
+- `through_mlam`
+- `all_layers`
+
+The two disk-array presets use `{example_name}` in `output.directory`. The
+renderer derives this value from the input `.blend` filename before its first
+dot, so `rx_array.realistic.boolean.blend` writes under
+`examples/aim/blender/renders/rx_array/`. An explicit `--output-dir` still
+overrides the preset directory.
 
 After adjusting a scene interactively in Blender, copy the camera location,
 rotation in degrees, and lens from the Camera properties into a new preset.
@@ -584,12 +597,19 @@ extrusion, which avoids creating expensive meshes for large layouts. The older
 `--cladding-mode solid`.
 
 The 256-point preprocessing limit remains in effect. The TUAM and PAAM cladding
-cutters are graph-colored into non-touching batches and subtracted with Exact
-Boolean modifiers. Use `--apply-cladding-boolean` to bake the same batched
-modifiers immediately. The Make equivalent is:
+cutters are graph-colored into non-touching batches, subtracted one at a time
+with Blender's low-memory Manifold solver, and baked into the cladding mesh.
+This is the default Boolean path and leaves no live dependency-graph Boolean
+evaluation in the saved `.blend`. The subtraction remains in Blender so GDS
+fracture boundaries do not become visible cladding edges.
+
+Use `--cladding-boolean-solver exact` only as a diagnostic fallback. Use
+`--keep-live-cladding-boolean` to preserve modifiers for inspection; both
+choices can require substantially more memory. The Make equivalents are:
 
 ```sh
-AIM_BLENDER_APPLY_CLADDING_BOOLEAN=1 \
+AIM_BLENDER_CLADDING_BOOLEAN_SOLVER=exact \
+AIM_BLENDER_APPLY_CLADDING_BOOLEAN=0 \
 make aim-blender-scene-example
 ```
 
@@ -676,6 +696,8 @@ All variables can be overridden on the command line as shown in the examples.
 | `AIM_BLENDER_Z_SCALE` | `1.0` | Vertical scale only |
 | `AIM_BLENDER_CAMERA_FIT_MARGIN` | `1.10` | Automatic camera-fit margin |
 | `AIM_BLENDER_CLADDING_MODE` | `boolean` | `boolean`, `solid`, or `omit` |
+| `AIM_BLENDER_CLADDING_BOOLEAN_SOLVER` | `manifold` | `manifold` low-memory default or `exact` diagnostic fallback |
+| `AIM_BLENDER_APPLY_CLADDING_BOOLEAN` | `1` | Bake Boolean batches sequentially; set to `0` to keep live modifiers |
 | `AIM_BLENDER_DELETE_LAYERS` | empty | Imported layers to remove |
 
 ### Render And Farm Output

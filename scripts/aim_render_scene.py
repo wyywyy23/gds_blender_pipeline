@@ -274,11 +274,14 @@ def select_runs(
 
 
 def resolve_output_directory(
-    preset: dict[str, Any], override: Path | None
+    preset: dict[str, Any], override: Path | None, *, example_name: str
 ) -> Path:
     if override is not None:
         return override
-    configured = Path(preset["output_directory"])
+    configured_text = preset["output_directory"].replace(
+        "{example_name}", example_name
+    )
+    configured = Path(configured_text)
     return configured if configured.is_absolute() else REPO_ROOT / configured
 
 
@@ -395,11 +398,16 @@ def render_preset(args: argparse.Namespace) -> None:
         for layer_name, objects in resolve_run_layer_objects(scene, run).items():
             resolved_layers.setdefault(layer_name, objects)
 
-    output_dir = resolve_output_directory(preset, args.output_dir)
+    blend_stem = Path(bpy.data.filepath).stem
+    example_name = blend_stem.split(".", 1)[0]
+    output_dir = resolve_output_directory(
+        preset,
+        args.output_dir,
+        example_name=example_name,
+    )
     if not args.dry_run:
         output_dir.mkdir(parents=True, exist_ok=True)
     extension = FORMAT_EXTENSIONS[preset["render"]["file_format"]]
-    blend_stem = Path(bpy.data.filepath).stem
     baseline_visibility = {obj: obj.hide_render for obj in scene.objects}
 
     try:

@@ -33,19 +33,5 @@ output:
   directory: examples/aim/blender/renders/trx_top
 
 runs:
-  - name: no_backend_or_cladding
-    hide_layers:
-      - cbam
-      - m1am
-      - v1am
-      - m2am
-      - vaam
-      - mlam
-      - cladding
-
-  - name: no_cladding
-    hide_layers:
-      - cladding
-
   - name: all_layers
     hide_layers: []

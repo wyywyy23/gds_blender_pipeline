@@ -20,7 +20,7 @@ from itertools import product
 from pathlib import Path
 import sys
 import tempfile
-from typing import Any
+from typing import Any, Iterator
 
 import yaml
 
@@ -40,6 +40,7 @@ CLADDING_CUTTER_LAYERS = (
     CLADDING_PASSIVATION_CUTTER_LAYER,
 )
 CLADDING_MODES = ("boolean", "solid", "omit")
+CLADDING_BOOLEAN_SOLVERS = ("manifold", "exact")
 
 
 def positive_float(value: str) -> float:
@@ -178,11 +179,33 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Keep the TUAM and PAAM cladding cutters visible after the booleans",
     )
     parser.add_argument(
-        "--apply-cladding-boolean",
-        action="store_true",
+        "--cladding-boolean-solver",
+        choices=CLADDING_BOOLEAN_SOLVERS,
+        default="manifold",
         help=(
-            "Apply the cladding booleans destructively instead of keeping live "
-            "modifiers"
+            "Boolean solver for graph-separated cladding cutter batches. "
+            "manifold is the low-memory default; exact is a diagnostic "
+            "fallback"
+        ),
+    )
+    boolean_storage = parser.add_mutually_exclusive_group()
+    boolean_storage.add_argument(
+        "--apply-cladding-boolean",
+        dest="apply_cladding_boolean",
+        action="store_true",
+        default=None,
+        help=(
+            "Bake cladding Boolean batches into the mesh (default in boolean "
+            "mode)"
+        ),
+    )
+    boolean_storage.add_argument(
+        "--keep-live-cladding-boolean",
+        dest="apply_cladding_boolean",
+        action="store_false",
+        help=(
+            "Keep cladding Boolean modifiers live for debugging; this can use "
+            "substantially more memory during dependency-graph evaluation"
         ),
     )
     parser.add_argument(
@@ -234,8 +257,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         args.cladding_mode = "solid"
     if args.cladding_mode != "boolean" and args.show_cladding_cutter:
         parser.error("--show-cladding-cutter requires --cladding-mode boolean")
-    if args.cladding_mode != "boolean" and args.apply_cladding_boolean:
+    if args.cladding_mode != "boolean" and args.apply_cladding_boolean is not None:
         parser.error("--apply-cladding-boolean requires --cladding-mode boolean")
+    if args.apply_cladding_boolean is None:
+        args.apply_cladding_boolean = args.cladding_mode == "boolean"
 
     args.gds = args.gds.resolve()
     args.stack_config = args.stack_config.resolve()
@@ -772,19 +797,23 @@ def color_touching_mesh_components(
     return colors
 
 
-def create_cladding_boolean_batches(
+def iter_cladding_boolean_batches(
     bpy: Any,
     *,
     cutter: Any,
     batch_prefix: str,
-) -> list[Any]:
+) -> Iterator[Any]:
     labels, component_count = mesh_component_labels(cutter.data)
     if component_count == 0:
         raise RuntimeError(f"Cladding cutter has no mesh components: {cutter.name}")
 
     colors = color_touching_mesh_components(cutter, labels, component_count)
     batch_count = max(colors) + 1
-    batches = []
+    sizes = [colors.count(color) for color in range(batch_count)]
+    print(
+        f"Split {cutter.name} into non-touching boolean batches: "
+        f"{component_count} components -> {batch_count} batches {sizes}"
+    )
 
     for color in range(batch_count):
         old_to_new: dict[int, int] = {}
@@ -815,14 +844,7 @@ def create_cladding_boolean_batches(
         batch.matrix_world = cutter.matrix_world.copy()
         batch.hide_viewport = True
         batch.hide_render = True
-        batches.append(batch)
-
-    sizes = [colors.count(color) for color in range(batch_count)]
-    print(
-        f"Split {cutter.name} into non-touching boolean batches: "
-        f"{component_count} components -> {batch_count} batches {sizes}"
-    )
-    return batches
+        yield batch
 
 
 def validate_bounded_cutter_crosses_target_top(*, cutter: Any, target: Any) -> None:
@@ -856,52 +878,55 @@ def add_cladding_cutter_boolean(
     cutter: Any,
     modifier_prefix: str,
     batch_prefix: str,
+    solver: str,
     apply_modifier: bool,
 ) -> int:
     recalculate_mesh_normals(cutter)
-    batches = create_cladding_boolean_batches(
+
+    # Polygon fracturing keeps GDS records/imports manageable, but it also makes
+    # each cutter a compound mesh of closed prisms. Some prisms touch at shared
+    # edges or points, so a single Boolean operand is unreliable. Graph-color
+    # touching components into separate, non-touching batches. MANIFOLD is both
+    # reliable on those batches and far less memory-intensive than EXACT.
+    blender_solver = solver.upper()
+    batch_count = 0
+    batches = iter_cladding_boolean_batches(
         bpy,
         cutter=cutter,
         batch_prefix=batch_prefix,
     )
-
-    # Polygon fracturing keeps GDS records/imports manageable, but it also makes
-    # each cutter a compound mesh of closed prisms. Some prisms touch at shared
-    # edges or points, and a single Boolean operand is unreliable: Exact can
-    # remove the entire target, Float can produce a non-manifold mesh, and
-    # Manifold can silently leave some cutter islands filled. Graph-color the
-    # touching components into non-touching batches, then subtract each batch
-    # with a live Exact modifier.
     for index, batch in enumerate(batches, start=1):
+        batch_count = index
         modifier = target.modifiers.new(f"{modifier_prefix}_{index:02d}", "BOOLEAN")
         modifier.operation = "DIFFERENCE"
         modifier.object = batch
-        modifier.solver = "EXACT"
+        modifier.solver = blender_solver
         modifier.show_viewport = True
         modifier.show_render = True
 
         if apply_modifier:
             bpy.ops.object.modifier_apply(modifier=modifier.name)
+            remove_boolean_batches(bpy, [batch])
 
     if apply_modifier:
-        remove_boolean_batches(bpy, batches)
         print(
-            f"Applied {len(batches)} cladding boolean modifiers: "
+            f"Applied {batch_count} {blender_solver} cladding boolean modifiers: "
             f"{cutter.name} -> {target.name}"
         )
     else:
         print(
-            f"Added {len(batches)} live Exact cladding boolean modifiers: "
+            f"Added {batch_count} live {blender_solver} cladding boolean modifiers: "
             f"{cutter.name} -> {target.name}"
         )
 
-    return len(batches)
+    return batch_count
 
 
 def apply_cladding_boolean(
     bpy: Any,
     *,
     show_cutter: bool,
+    solver: str,
     apply_modifier: bool,
 ) -> bool:
     target = find_imported_layer_object(bpy, CLADDING_LAYER)
@@ -949,6 +974,7 @@ def apply_cladding_boolean(
             cutter=cutter,
             modifier_prefix=spec["modifier_prefix"],
             batch_prefix=spec["batch_prefix"],
+            solver=solver,
             apply_modifier=apply_modifier,
         )
         applied_cutters += 1
@@ -1076,6 +1102,12 @@ def build_scene(args: argparse.Namespace) -> None:
     print(f"GDS unit scale:     {args.unit_scale:g}")
     print(f"Z exaggeration:     {args.z_scale:g}x")
     print(f"Cladding mode:      {args.cladding_mode}")
+    if args.cladding_mode == "boolean":
+        print(f"Cladding solver:    {args.cladding_boolean_solver.upper()}")
+        print(
+            "Cladding storage:   "
+            + ("baked" if args.apply_cladding_boolean else "live modifiers")
+        )
     if args.no_cladding_boolean:
         print("Deprecated --no-cladding-boolean mapped to --cladding-mode solid")
 
@@ -1115,6 +1147,7 @@ def build_scene(args: argparse.Namespace) -> None:
         applied = apply_cladding_boolean(
             bpy,
             show_cutter=args.show_cladding_cutter,
+            solver=args.cladding_boolean_solver,
             apply_modifier=args.apply_cladding_boolean,
         )
         print(f"Applied cladding boolean: {applied}")

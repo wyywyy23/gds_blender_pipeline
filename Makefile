@@ -18,7 +18,8 @@ AIM_BLENDER_DELETE_LAYERS ?=
 AIM_BLENDER_Z_SCALE ?= 1.0
 AIM_BLENDER_CAMERA_FIT_MARGIN ?= 1.10
 AIM_BLENDER_CLADDING_MODE ?= boolean
-AIM_BLENDER_APPLY_CLADDING_BOOLEAN ?= 0
+AIM_BLENDER_CLADDING_BOOLEAN_SOLVER ?= manifold
+AIM_BLENDER_APPLY_CLADDING_BOOLEAN ?= 1
 AIM_PREPROCESS_MAX_POLYGON_VERTICES ?= 256
 AIM_BLENDER_MERGE_LAYERS ?= 0
 
@@ -125,7 +126,8 @@ aim-blender-scene-example: aim-preprocess-example
 			--z-scale $(AIM_BLENDER_Z_SCALE) \
 			--camera-fit-margin $(AIM_BLENDER_CAMERA_FIT_MARGIN) \
 			--cladding-mode $(AIM_BLENDER_CLADDING_MODE) \
-			$(if $(filter 1 true yes,$(AIM_BLENDER_APPLY_CLADDING_BOOLEAN)),--apply-cladding-boolean) \
+			--cladding-boolean-solver $(AIM_BLENDER_CLADDING_BOOLEAN_SOLVER) \
+			$(if $(filter 0 false no,$(AIM_BLENDER_APPLY_CLADDING_BOOLEAN)),--keep-live-cladding-boolean) \
 			$(if $(filter 0 false no,$(AIM_BLENDER_MERGE_LAYERS)),--no-merge-layers) \
 			$(if $(strip $(AIM_BLENDER_DELETE_LAYERS)),--delete-layers "$(AIM_BLENDER_DELETE_LAYERS)"); \
 	done
