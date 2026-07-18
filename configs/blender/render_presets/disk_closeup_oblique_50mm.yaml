@@ -1,0 +1,86 @@
+# SPDX-FileCopyrightText: 2026
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+version: 1
+name: disk_closeup_oblique_50mm
+
+camera:
+  object: Camera
+  type: PERSP
+  location: [247.5, -120, 18]
+  rotation_degrees: [70, 0, 0]
+  lens_mm: 50.0
+
+lighting:
+  sun:
+    object: Sun
+    strength: 5.0
+
+color_management:
+  view_transform: AgX
+  look: AgX - High Contrast
+
+render:
+  engine: CYCLES
+  samples: 1024
+  denoise: false
+  # Disable adaptive early termination so every pixel uses the requested count.
+  adaptive_sampling: false
+  file_format: PNG
+
+output:
+  directory: examples/aim/blender/renders/{example_name}
+
+runs:
+  - name: no_backend_or_cladding
+    hide_layers:
+      - cbam
+      - m1am
+      - v1am
+      - m2am
+      - vaam
+      - mlam
+      - cladding
+
+  - name: through_cbam
+    hide_layers:
+      - m1am
+      - v1am
+      - m2am
+      - vaam
+      - mlam
+      - cladding
+
+  - name: through_m1am
+    hide_layers:
+      - v1am
+      - m2am
+      - vaam
+      - mlam
+      - cladding
+
+  - name: through_v1am
+    hide_layers:
+      - m2am
+      - vaam
+      - mlam
+      - cladding
+
+  - name: through_m2am
+    hide_layers:
+      - vaam
+      - mlam
+      - cladding
+
+  - name: through_vaam
+    hide_layers:
+      - mlam
+      - cladding
+
+  - name: through_mlam
+    hide_layers:
+      - cladding
+
+  - name: all_layers
+    hide_layers: []
