@@ -398,6 +398,8 @@ lighting:
   sun:
     object: Sun
     strength: 6.0
+    # Optional. When omitted, defaults to [camera_x, 0, -camera_z].
+    # rotation_degrees: [29.527, 0.0, -32.57]
 
 color_management:
   view_transform: AgX
@@ -424,6 +426,9 @@ Preset layer names accept short names such as `cladding` or `cbam`; the runner
 normalizes them to Blender render-layer object names. Presets currently support
 perspective cameras and Cycles. Render resolution remains the value saved in
 the source scene, and CPU/GPU device selection remains a machine-side setting.
+If `lighting.sun.rotation_degrees` is omitted, the Sun rotation is derived from
+the preset camera as `[camera_x, 0, -camera_z]`. An explicit three-angle Sun
+rotation overrides that default.
 
 ### With Make
 

@@ -135,12 +135,28 @@ def load_preset(path: Path) -> dict[str, Any]:
         sun_object = sun_data.get("object", "Sun")
         if not isinstance(sun_object, str) or not sun_object:
             raise ValueError("lighting.sun.object must be a non-empty string")
+        sun_rotation_any = sun_data.get("rotation_degrees")
+        if sun_rotation_any is None:
+            camera_rotation = camera["rotation_degrees"]
+            sun_rotation = (
+                camera_rotation[0],
+                0.0,
+                -camera_rotation[2],
+            )
+            sun_rotation_source = "camera-derived default"
+        else:
+            sun_rotation = require_vector3(
+                sun_rotation_any, "lighting.sun.rotation_degrees"
+            )
+            sun_rotation_source = "preset"
         lighting = {
             "sun": {
                 "object": sun_object,
                 "strength": require_positive_number(
                     sun_data.get("strength"), "lighting.sun.strength"
                 ),
+                "rotation_degrees": sun_rotation,
+                "rotation_source": sun_rotation_source,
             }
         }
 
@@ -356,7 +372,16 @@ def apply_lighting(scene: Any, lighting_config: dict[str, Any] | None) -> None:
     if sun is None or sun.type != "LIGHT" or sun.data.type != "SUN":
         raise ValueError(f"Sun light object not found: {sun_config['object']}")
     sun.data.energy = sun_config["strength"]
-    print(f"Lighting preset: sun={sun.name}, strength={sun.data.energy:g}")
+    sun.rotation_mode = "XYZ"
+    sun.rotation_euler = tuple(
+        math.radians(value) for value in sun_config["rotation_degrees"]
+    )
+    print(
+        "Lighting preset: "
+        f"sun={sun.name}, strength={sun.data.energy:g}, "
+        f"rotation_degrees={sun_config['rotation_degrees']} "
+        f"({sun_config['rotation_source']})"
+    )
 
 
 def apply_color_management(
