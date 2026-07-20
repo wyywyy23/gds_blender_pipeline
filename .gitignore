@@ -19,6 +19,7 @@ configs/blender/aim.yaml
 examples/**/raw/
 examples/**/visual/
 examples/**/blender/
+/.local/runs/
 
 # Python
 **/__pycache__/

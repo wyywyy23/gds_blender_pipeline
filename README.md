@@ -12,6 +12,27 @@ post-processing.
 All commands below are run from the repository root. Private foundry data, raw
 layouts, generated GDS files, renders, and `.blend` files are ignored by Git.
 
+## Simplest Complete Run
+
+For a small AIM layout, provide one raw GDS and one render preset:
+
+```sh
+make aim-run GDS=path/to/input.gds PRESET=path/to/preset.yaml
+```
+
+This one command preprocesses the GDS, builds a realistic-color scene with the
+default baked Manifold cladding Boolean, and renders every run in the preset.
+Outputs are kept together under `.local/runs/<gds-name>/`:
+
+```text
+visual/<gds-name>.visual.gds
+blender/<gds-name>.realistic.blend
+renders/*.png
+```
+
+The longer workflows below remain available when individual stages or
+nondefault geometry and material controls are needed.
+
 ## Workflows At A Glance
 
 ```text
@@ -33,6 +54,7 @@ private AIM config + raw GDS
 
 | Goal | Make target | Main input | Main output |
 | --- | --- | --- | --- |
+| Complete default run | `make aim-run GDS=... PRESET=...` | One raw GDS and one render preset | Visual GDS, realistic `.blend`, and preset renders under `.local/runs/` |
 | [Set up Python dependencies](#requirements-and-setup) | `make env` | `environment.yml` | Conda environment `gds-blender-pipeline` |
 | [Generate AIM layer metadata](#workflow-1-generate-aim-metadata) | `make aim-registry aim-blendergds-config` | Private AIM YAML and PDK tech file | Generated YAML under `configs/aim/` and `configs/blender/aim.yaml` |
 | [Preprocess one GDS](#workflow-2-preprocess-raw-gds) | `make aim-preprocess-example` | `examples/<case>/raw/<file>.gds` | `examples/<case>/visual/<file>.visual.gds` |

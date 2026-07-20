@@ -45,12 +45,55 @@ EXAMPLE_GDS ?= $(EXAMPLE_RAW_DIR)/tx_array_checkered.gds
 EXAMPLE_VISUAL_GDS ?= $(EXAMPLE_VISUAL_DIR)/tx_array_checkered.visual.gds
 EXAMPLE_BLEND ?= $(EXAMPLE_BLENDER_DIR)/tx_array_checkered.blend
 
+# Minimal raw-GDS-to-render workflow. Users only provide GDS and PRESET.
+GDS ?=
+PRESET ?=
+AIM_RUN_ROOT ?= .local/runs
+AIM_RUN_NAME = $(basename $(notdir $(GDS)))
+AIM_RUN_DIR = $(AIM_RUN_ROOT)/$(AIM_RUN_NAME)
+AIM_RUN_VISUAL_GDS = $(AIM_RUN_DIR)/visual/$(AIM_RUN_NAME).visual.gds
+AIM_RUN_BASE_BLEND = $(AIM_RUN_DIR)/blender/$(AIM_RUN_NAME).blend
+AIM_RUN_REALISTIC_BLEND = $(AIM_RUN_DIR)/blender/$(AIM_RUN_NAME).realistic.blend
+AIM_RUN_RENDER_DIR = $(AIM_RUN_DIR)/renders
+
 .PHONY: \
 	env env-update env-remove env-info \
 	aim-render-layers aim-registry aim-blendergds-config \
 	aim-preprocess-example aim-preprocess-all-examples \
 	aim-blender-scene-example aim-render-preset aim-prepare-render-blend \
-	aim-clean-generated
+	aim-run aim-clean-generated
+
+aim-run:
+	@test -n "$(strip $(GDS))" || { echo "Usage: make aim-run GDS=path/to/input.gds PRESET=path/to/preset.yaml"; exit 2; }
+	@test -n "$(strip $(PRESET))" || { echo "Usage: make aim-run GDS=path/to/input.gds PRESET=path/to/preset.yaml"; exit 2; }
+	@test -f "$(GDS)" || { echo "GDS file not found: $(GDS)"; exit 2; }
+	@test -f "$(PRESET)" || { echo "Preset file not found: $(PRESET)"; exit 2; }
+	@echo "Running AIM GDS -> realistic Boolean scene -> preset renders"
+	+$(MAKE) aim-blender-scene-example \
+		EXAMPLE_DIR="$(AIM_RUN_DIR)" \
+		EXAMPLE_GDS="$(GDS)" \
+		EXAMPLE_VISUAL_GDS="$(AIM_RUN_VISUAL_GDS)" \
+		EXAMPLE_BLEND="$(AIM_RUN_BASE_BLEND)" \
+		AIM_BLENDER_COLORS="configs/blender/colors/aim/realistic.yaml" \
+		AIM_PREPROCESS_MAX_POLYGON_VERTICES=256 \
+		AIM_BLENDER_Z_SCALE=1.0 \
+		AIM_BLENDER_CAMERA_FIT_MARGIN=1.10 \
+		AIM_BLENDER_CLADDING_MODE=boolean \
+		AIM_BLENDER_CLADDING_BOOLEAN_SOLVER=manifold \
+		AIM_BLENDER_CLADDING_UNDERCUT_METHOD=fractured_batches \
+		AIM_BLENDER_CLADDING_UNFRACTURED_CUTTER= \
+		AIM_BLENDER_CLADDING_EXPLICIT_MESH= \
+		AIM_BLENDER_CLADDING_EXPLICIT_CHUNK_SIZE_UM=0 \
+		AIM_BLENDER_APPLY_CLADDING_BOOLEAN=1 \
+		AIM_BLENDER_DELETE_LAYERS= \
+		AIM_BLENDER_MERGE_LAYERS=0
+	+$(MAKE) aim-render-preset \
+		AIM_RENDER_BLEND="$(AIM_RUN_REALISTIC_BLEND)" \
+		AIM_RENDER_PRESET="$(PRESET)" \
+		AIM_RENDER_RUNS= \
+		AIM_RENDER_OUTPUT_DIR="$(AIM_RUN_RENDER_DIR)"
+	@echo "Scene:   $(AIM_RUN_REALISTIC_BLEND)"
+	@echo "Renders: $(AIM_RUN_RENDER_DIR)"
 
 env:
 	conda env create -f environment.yml || conda env update -f environment.yml --prune
