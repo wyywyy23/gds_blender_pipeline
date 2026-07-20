@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from itertools import product
+import math
 from pathlib import Path
 import sys
 import tempfile
@@ -41,8 +42,13 @@ CLADDING_CUTTER_LAYERS = (
 )
 CLADDING_MODES = ("boolean", "solid", "omit")
 CLADDING_BOOLEAN_SOLVERS = ("manifold", "exact")
-CLADDING_UNDERCUT_METHODS = ("fractured_batches", "unfractured_cutter")
+CLADDING_UNDERCUT_METHODS = (
+    "fractured_batches",
+    "unfractured_cutter",
+    "tiled_explicit_mesh",
+)
 CLADDING_UNFRACTURED_CUTTER_FORMAT_VERSION = 1
+CLADDING_TILED_EXPLICIT_MESH_FORMAT_VERSION = 1
 
 
 def positive_float(value: str) -> float:
@@ -197,7 +203,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "TUAM subtraction method. fractured_batches preserves the default "
             "GDS-fragment workflow; unfractured_cutter performs one Boolean "
-            "from complete logical openings supplied by a sidecar"
+            "from complete logical openings supplied by a sidecar; "
+            "tiled_explicit_mesh replaces the cladding with a validated "
+            "all-triangle sidecar and performs no Blender Boolean"
         ),
     )
     parser.add_argument(
@@ -207,6 +215,25 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Validated .npz logical-opening cutter sidecar required by "
             "--cladding-undercut-method unfractured_cutter"
+        ),
+    )
+    parser.add_argument(
+        "--cladding-explicit-mesh",
+        type=Path,
+        default=None,
+        help=(
+            "Validated explicitly triangulated cladding .npz required by "
+            "--cladding-undercut-method tiled_explicit_mesh"
+        ),
+    )
+    parser.add_argument(
+        "--cladding-explicit-chunk-size-um",
+        type=float,
+        default=0.0,
+        help=(
+            "Opt-in spatial chunk size for tiled explicit cladding. Each "
+            "chunk uses a local object origin to preserve float32 precision; "
+            "0 keeps the single-object behavior"
         ),
     )
     boolean_storage = parser.add_mutually_exclusive_group()
@@ -285,23 +312,47 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     if args.cladding_undercut_method != "fractured_batches":
         if args.cladding_mode != "boolean":
             parser.error(
-                "--cladding-undercut-method unfractured_cutter requires "
+                "nondefault --cladding-undercut-method requires "
                 "--cladding-mode boolean"
             )
+        if not args.apply_cladding_boolean:
+            parser.error(
+                "nondefault --cladding-undercut-method currently requires "
+                "baked geometry"
+            )
+    if args.cladding_undercut_method == "unfractured_cutter":
         if args.cladding_unfractured_cutter is None:
             parser.error(
                 "--cladding-undercut-method unfractured_cutter requires "
                 "--cladding-unfractured-cutter"
             )
-        if not args.apply_cladding_boolean:
-            parser.error(
-                "--cladding-undercut-method unfractured_cutter currently "
-                "requires baked Booleans"
-            )
     elif args.cladding_unfractured_cutter is not None:
         parser.error(
             "--cladding-unfractured-cutter requires "
             "--cladding-undercut-method unfractured_cutter"
+        )
+    if args.cladding_undercut_method == "tiled_explicit_mesh":
+        if args.cladding_explicit_mesh is None:
+            parser.error(
+                "--cladding-undercut-method tiled_explicit_mesh requires "
+                "--cladding-explicit-mesh"
+            )
+    elif args.cladding_explicit_mesh is not None:
+        parser.error(
+            "--cladding-explicit-mesh requires "
+            "--cladding-undercut-method tiled_explicit_mesh"
+        )
+    if not math.isfinite(args.cladding_explicit_chunk_size_um):
+        parser.error("--cladding-explicit-chunk-size-um must be finite")
+    if args.cladding_explicit_chunk_size_um < 0:
+        parser.error("--cladding-explicit-chunk-size-um cannot be negative")
+    if (
+        args.cladding_explicit_chunk_size_um > 0
+        and args.cladding_undercut_method != "tiled_explicit_mesh"
+    ):
+        parser.error(
+            "--cladding-explicit-chunk-size-um requires "
+            "--cladding-undercut-method tiled_explicit_mesh"
         )
 
     args.gds = args.gds.resolve()
@@ -311,6 +362,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         args.cladding_unfractured_cutter = (
             args.cladding_unfractured_cutter.resolve()
         )
+    if args.cladding_explicit_mesh is not None:
+        args.cladding_explicit_mesh = args.cladding_explicit_mesh.resolve()
     args.output = (
         default_output_blend(args.gds).resolve()
         if args.output is None
@@ -325,8 +378,12 @@ def require_file(path: Path, label: str) -> None:
         raise FileNotFoundError(f"{label} does not exist: {path}")
 
 
-def excluded_cladding_layers(mode: str) -> set[str]:
+def excluded_cladding_layers(
+    mode: str, *, undercut_method: str = "fractured_batches"
+) -> set[str]:
     if mode == "boolean":
+        if undercut_method == "tiled_explicit_mesh":
+            return set(CLADDING_CUTTER_LAYERS)
         return set()
     if mode == "solid":
         return set(CLADDING_CUTTER_LAYERS)
@@ -336,10 +393,16 @@ def excluded_cladding_layers(mode: str) -> set[str]:
 
 
 def prepare_import_stack_config(
-    source: Path, *, cladding_mode: str, temp_dir: Path
+    source: Path,
+    *,
+    cladding_mode: str,
+    cladding_undercut_method: str = "fractured_batches",
+    temp_dir: Path,
 ) -> Path:
     """Write a temporary stack without cladding layers excluded before import."""
-    excluded = excluded_cladding_layers(cladding_mode)
+    excluded = excluded_cladding_layers(
+        cladding_mode, undercut_method=cladding_undercut_method
+    )
     if not excluded:
         return source
 
@@ -820,12 +883,465 @@ def load_unfractured_cutter_sidecar(path: Path) -> dict[str, Any]:
         f"{len(triangles)} planar triangles, {len(boundary_edges)} boundary edges)"
     )
     return {
-        "xy_dbu": xy_dbu.astype(np.float64, copy=False),
+        "xy_dbu": xy_dbu.astype(np.int32, copy=False),
         "triangles": triangles.astype(np.int32, copy=False),
         "boundary_edges": boundary_edges.astype(np.int32, copy=False),
         "dbu_um": dbu_um,
         "component_count": component_count,
     }
+
+
+def load_tiled_explicit_cladding_sidecar(path: Path) -> dict[str, Any]:
+    import numpy as np
+
+    required = {
+        "format_version",
+        "xy_dbu",
+        "vertex_planes",
+        "triangles",
+        "dbu_um",
+        "z_planes_um",
+        "tile_size_dbu",
+        "maximum_horizontal_span_dbu",
+        "horizontal_face_count",
+        "wall_edge_counts",
+        "capped_sliver_face_count",
+        "validated_closed_oriented_topology",
+    }
+    with np.load(path, allow_pickle=False) as archive:
+        missing = required - set(archive.files)
+        if missing:
+            raise ValueError(
+                f"Explicit cladding sidecar is missing: {sorted(missing)}"
+            )
+        data = {name: archive[name].copy() for name in required}
+
+    def scalar(name: str) -> Any:
+        values = data[name].reshape(-1)
+        if len(values) != 1:
+            raise ValueError(f"Sidecar {name} must contain one value")
+        return values[0]
+
+    version = int(scalar("format_version"))
+    if version != CLADDING_TILED_EXPLICIT_MESH_FORMAT_VERSION:
+        raise ValueError(
+            f"Unsupported explicit cladding format {version}; expected "
+            f"{CLADDING_TILED_EXPLICIT_MESH_FORMAT_VERSION}"
+        )
+    if int(scalar("validated_closed_oriented_topology")) != 1:
+        raise ValueError("Explicit cladding sidecar is not topology-validated")
+    xy_dbu = data["xy_dbu"]
+    vertex_planes = data["vertex_planes"]
+    triangles = data["triangles"]
+    z_planes_um = data["z_planes_um"].astype(np.float64, copy=False)
+    wall_edge_counts = data["wall_edge_counts"].astype(np.int64, copy=False)
+    dbu_um = float(scalar("dbu_um"))
+    if xy_dbu.ndim != 2 or xy_dbu.shape[1] != 2 or len(xy_dbu) < 4:
+        raise ValueError(f"Invalid explicit cladding XY shape: {xy_dbu.shape}")
+    if vertex_planes.shape != (len(xy_dbu),):
+        raise ValueError(
+            f"Invalid explicit cladding plane shape: {vertex_planes.shape}"
+        )
+    if z_planes_um.shape != (3,) or not np.all(np.diff(z_planes_um) > 0):
+        raise ValueError(f"Invalid explicit cladding Z planes: {z_planes_um}")
+    if np.any(vertex_planes > 2):
+        raise ValueError("Explicit cladding has an invalid vertex plane index")
+    if triangles.ndim != 2 or triangles.shape[1] != 3 or len(triangles) == 0:
+        raise ValueError(
+            f"Invalid explicit cladding triangle shape: {triangles.shape}"
+        )
+    if np.any(triangles < 0) or np.any(triangles >= len(xy_dbu)):
+        raise ValueError("Explicit cladding triangle indices are out of range")
+    if dbu_um <= 0 or not np.isfinite(dbu_um):
+        raise ValueError(f"Invalid explicit cladding database unit: {dbu_um}")
+    if wall_edge_counts.shape != (2,) or np.any(wall_edge_counts < 0):
+        raise ValueError(
+            f"Invalid explicit cladding wall counts: {wall_edge_counts}"
+        )
+    horizontal_face_count = int(scalar("horizontal_face_count"))
+    capped_sliver_face_count = int(scalar("capped_sliver_face_count"))
+    expected_face_count = (
+        horizontal_face_count + int(wall_edge_counts.sum()) * 2
+    )
+    if expected_face_count != len(triangles):
+        raise ValueError(
+            "Explicit cladding face metadata does not match triangles: "
+            f"{expected_face_count} != {len(triangles)}"
+        )
+    if not 0 <= capped_sliver_face_count <= horizontal_face_count:
+        raise ValueError(
+            "Invalid explicit cladding capped sliver face count: "
+            f"{capped_sliver_face_count}"
+        )
+    print(
+        "Loaded validated tiled explicit cladding sidecar: "
+        f"{path} ({len(xy_dbu)} vertices, {len(triangles)} triangles, "
+        f"tile={int(scalar('tile_size_dbu')) * dbu_um:g} um, "
+        f"max horizontal span="
+        f"{float(scalar('maximum_horizontal_span_dbu')) * dbu_um:g} um)"
+    )
+    return {
+        "xy_dbu": xy_dbu.astype(np.float64, copy=False),
+        "vertex_planes": vertex_planes.astype(np.int32, copy=False),
+        "triangles": triangles.astype(np.int32, copy=False),
+        "dbu_um": dbu_um,
+        "z_planes_um": z_planes_um,
+        "horizontal_face_count": horizontal_face_count,
+        "wall_edge_counts": wall_edge_counts,
+        "capped_sliver_face_count": capped_sliver_face_count,
+    }
+
+
+def replace_with_tiled_explicit_cladding_mesh(
+    bpy: Any,
+    *,
+    target: Any,
+    sidecar: dict[str, Any],
+    z_scale: float,
+) -> None:
+    import numpy as np
+
+    bpy.context.view_layer.update()
+    xy_world = sidecar["xy_dbu"] * sidecar["dbu_um"]
+    z_planes = sidecar["z_planes_um"] * z_scale
+    source_xy_bounds = np.asarray(object_world_xy_bounds(target), dtype=np.float64)
+    generated_xy_bounds = np.asarray(
+        (
+            xy_world[:, 0].min(),
+            xy_world[:, 1].min(),
+            xy_world[:, 0].max(),
+            xy_world[:, 1].max(),
+        ),
+        dtype=np.float64,
+    )
+    xy_error = float(np.max(np.abs(source_xy_bounds - generated_xy_bounds)))
+    tolerance = max(2.0e-3, sidecar["dbu_um"] * 2.0)
+    if xy_error > tolerance:
+        raise RuntimeError(
+            "Explicit cladding does not match imported cladding XY bounds: "
+            f"source={source_xy_bounds.tolist()}, "
+            f"generated={generated_xy_bounds.tolist()}, error={xy_error:g}"
+        )
+    source_z_bounds = np.asarray(object_world_z_bounds(target), dtype=np.float64)
+    z_error = float(
+        np.max(np.abs(source_z_bounds - z_planes[[0, 2]]))
+    )
+    if z_error > tolerance:
+        raise RuntimeError(
+            "Explicit cladding does not match imported cladding Z bounds: "
+            f"source={source_z_bounds.tolist()}, "
+            f"generated={z_planes[[0, 2]].tolist()}, error={z_error:g}"
+        )
+
+    world_coordinates = np.ones((len(xy_world), 4), dtype=np.float64)
+    world_coordinates[:, :2] = xy_world
+    world_coordinates[:, 2] = z_planes[sidecar["vertex_planes"]]
+    inverse = np.asarray(
+        [list(row) for row in target.matrix_world.inverted()], dtype=np.float64
+    )
+    local_coordinates = (world_coordinates @ inverse.T)[:, :3].astype(np.float32)
+    triangles = sidecar["triangles"]
+    loop_vertices = triangles.reshape(-1)
+    polygon_count = len(triangles)
+    loop_starts = np.arange(polygon_count, dtype=np.int32) * 3
+    loop_totals = np.full(polygon_count, 3, dtype=np.int32)
+
+    old_mesh = target.data
+    mesh = bpy.data.meshes.new(f"{old_mesh.name}_TiledExplicit")
+    mesh.vertices.add(len(local_coordinates))
+    mesh.vertices.foreach_set("co", local_coordinates.reshape(-1))
+    mesh.loops.add(len(loop_vertices))
+    mesh.loops.foreach_set("vertex_index", loop_vertices)
+    mesh.polygons.add(polygon_count)
+    mesh.polygons.foreach_set("loop_start", loop_starts)
+    mesh.polygons.foreach_set("loop_total", loop_totals)
+    mesh.polygons.foreach_set(
+        "use_smooth", np.zeros(polygon_count, dtype=np.bool_)
+    )
+    for material in old_mesh.materials:
+        mesh.materials.append(material)
+    mesh.update(calc_edges=True)
+    mesh.calc_loop_triangles()
+    if len(mesh.loop_triangles) != polygon_count:
+        raise RuntimeError(
+            "Explicit triangle mesh changed during Blender tessellation: "
+            f"{len(mesh.loop_triangles)} != {polygon_count}"
+        )
+    target.data = mesh
+    if old_mesh.users == 0:
+        bpy.data.meshes.remove(old_mesh)
+    target["aim_cladding_undercut_method"] = "tiled_explicit_mesh"
+    target["aim_explicit_topology_validated"] = True
+    target["aim_explicit_triangle_count"] = polygon_count
+    bpy.context.view_layer.update()
+    print(
+        "Replaced solid cladding with validated tiled explicit mesh: "
+        f"{len(local_coordinates)} vertices, {polygon_count} triangles, "
+        f"XY error={xy_error:g}, Z error={z_error:g}"
+    )
+
+
+def replace_with_spatially_chunked_cladding_mesh(
+    bpy: Any,
+    *,
+    target: Any,
+    sidecar: dict[str, Any],
+    z_scale: float,
+    chunk_size_um: float,
+) -> None:
+    import numpy as np
+    from mathutils import Matrix
+
+    if chunk_size_um <= 0:
+        raise ValueError("Explicit cladding chunk size must be positive")
+
+    bpy.context.view_layer.update()
+    xy_dbu = sidecar["xy_dbu"].astype(np.int64, copy=False)
+    dbu_um = sidecar["dbu_um"]
+    xy_world = xy_dbu.astype(np.float64) * dbu_um
+    z_planes = sidecar["z_planes_um"] * z_scale
+    source_xy_bounds = np.asarray(object_world_xy_bounds(target), dtype=np.float64)
+    generated_xy_bounds = np.asarray(
+        (
+            xy_world[:, 0].min(),
+            xy_world[:, 1].min(),
+            xy_world[:, 0].max(),
+            xy_world[:, 1].max(),
+        ),
+        dtype=np.float64,
+    )
+    xy_error = float(np.max(np.abs(source_xy_bounds - generated_xy_bounds)))
+    tolerance = max(2.0e-3, dbu_um * 2.0)
+    if xy_error > tolerance:
+        raise RuntimeError(
+            "Chunked explicit cladding does not match imported cladding XY "
+            f"bounds: source={source_xy_bounds.tolist()}, "
+            f"generated={generated_xy_bounds.tolist()}, error={xy_error:g}"
+        )
+    source_z_bounds = np.asarray(object_world_z_bounds(target), dtype=np.float64)
+    z_error = float(np.max(np.abs(source_z_bounds - z_planes[[0, 2]])))
+    if z_error > tolerance:
+        raise RuntimeError(
+            "Chunked explicit cladding does not match imported cladding Z "
+            f"bounds: source={source_z_bounds.tolist()}, "
+            f"generated={z_planes[[0, 2]].tolist()}, error={z_error:g}"
+        )
+
+    chunk_size_dbu = max(1, int(round(chunk_size_um / dbu_um)))
+    xy_min = xy_dbu.min(axis=0)
+    xy_max = xy_dbu.max(axis=0)
+    chunk_columns = max(
+        1, int((int(xy_max[0] - xy_min[0]) + chunk_size_dbu - 1) // chunk_size_dbu)
+    )
+    chunk_rows = max(
+        1, int((int(xy_max[1] - xy_min[1]) + chunk_size_dbu - 1) // chunk_size_dbu)
+    )
+    triangles = sidecar["triangles"]
+    triangle_count = len(triangles)
+    chunk_ids = np.empty(triangle_count, dtype=np.int32)
+
+    def ids_for_faces(face_indices: np.ndarray) -> np.ndarray:
+        points = xy_dbu[triangles[face_indices]]
+        coordinate_sum = points.sum(axis=1, dtype=np.int64)
+        denominator = points.shape[1]
+        columns = np.floor_divide(
+            coordinate_sum[:, 0] - int(xy_min[0]) * denominator,
+            chunk_size_dbu * denominator,
+        )
+        rows = np.floor_divide(
+            coordinate_sum[:, 1] - int(xy_min[1]) * denominator,
+            chunk_size_dbu * denominator,
+        )
+        np.clip(columns, 0, chunk_columns - 1, out=columns)
+        np.clip(rows, 0, chunk_rows - 1, out=rows)
+        return (rows * chunk_columns + columns).astype(np.int32, copy=False)
+
+    block_size = 500_000
+    capped_face_count = sidecar["capped_sliver_face_count"]
+    wall_edge_counts = sidecar["wall_edge_counts"]
+    wall_face_count = int(wall_edge_counts.sum()) * 2
+    horizontal_prefix_count = triangle_count - capped_face_count - wall_face_count
+    for start in range(0, horizontal_prefix_count, block_size):
+        stop = min(start + block_size, horizontal_prefix_count)
+        indices = np.arange(start, stop, dtype=np.int64)
+        chunk_ids[start:stop] = ids_for_faces(indices)
+
+    wall_start = horizontal_prefix_count
+    for wall_edge_count in wall_edge_counts:
+        wall_edge_count = int(wall_edge_count)
+        for edge_start in range(0, wall_edge_count, block_size):
+            edge_stop = min(edge_start + block_size, wall_edge_count)
+            first_faces = wall_start + np.arange(
+                edge_start, edge_stop, dtype=np.int64
+            ) * 2
+            points = xy_dbu[triangles[first_faces, :2]]
+            coordinate_sum = points.sum(axis=1, dtype=np.int64)
+            columns = np.floor_divide(
+                coordinate_sum[:, 0] - int(xy_min[0]) * 2,
+                chunk_size_dbu * 2,
+            )
+            rows = np.floor_divide(
+                coordinate_sum[:, 1] - int(xy_min[1]) * 2,
+                chunk_size_dbu * 2,
+            )
+            np.clip(columns, 0, chunk_columns - 1, out=columns)
+            np.clip(rows, 0, chunk_rows - 1, out=rows)
+            ids = (rows * chunk_columns + columns).astype(
+                np.int32, copy=False
+            )
+            chunk_ids[first_faces] = ids
+            chunk_ids[first_faces + 1] = ids
+        wall_start += wall_edge_count * 2
+
+    if capped_face_count:
+        cap_start = triangle_count - capped_face_count
+        for start in range(cap_start, triangle_count, block_size):
+            stop = min(start + block_size, triangle_count)
+            indices = np.arange(start, stop, dtype=np.int64)
+            chunk_ids[start:stop] = ids_for_faces(indices)
+
+    chunk_capacity = chunk_columns * chunk_rows
+    counts = np.bincount(chunk_ids, minlength=chunk_capacity)
+    active_chunks = np.flatnonzero(counts)
+    order = np.argsort(chunk_ids, kind="stable")
+    offsets = np.empty(chunk_capacity + 1, dtype=np.int64)
+    offsets[0] = 0
+    np.cumsum(counts, out=offsets[1:])
+
+    old_mesh = target.data
+    materials = list(old_mesh.materials)
+    target_collections = list(target.users_collection)
+    base_name = target.name
+    converted_horizontal_sign_changes = 0
+    created_objects = []
+    created_triangle_count = 0
+    created_vertex_count = 0
+
+    for sequence, chunk_id in enumerate(active_chunks):
+        chunk_id = int(chunk_id)
+        face_indices = order[offsets[chunk_id] : offsets[chunk_id + 1]]
+        global_faces = triangles[face_indices]
+        unique_vertices, inverse = np.unique(
+            global_faces.reshape(-1), return_inverse=True
+        )
+        local_faces = inverse.reshape((-1, 3)).astype(np.int32, copy=False)
+        column = chunk_id % chunk_columns
+        row = chunk_id // chunk_columns
+        origin_dbu = np.asarray(
+            (
+                int(xy_min[0]) + column * chunk_size_dbu + chunk_size_dbu // 2,
+                int(xy_min[1]) + row * chunk_size_dbu + chunk_size_dbu // 2,
+            ),
+            dtype=np.int64,
+        )
+        local_coordinates = np.empty((len(unique_vertices), 3), dtype=np.float32)
+        local_coordinates[:, :2] = (
+            (xy_dbu[unique_vertices] - origin_dbu).astype(np.float64) * dbu_um
+        ).astype(np.float32)
+        local_coordinates[:, 2] = z_planes[
+            sidecar["vertex_planes"][unique_vertices]
+        ].astype(np.float32)
+
+        face_planes = sidecar["vertex_planes"][global_faces]
+        horizontal = np.all(face_planes == face_planes[:, :1], axis=1)
+        if np.any(horizontal):
+            original_points = xy_dbu[global_faces[horizontal]]
+            original_u = original_points[:, 1] - original_points[:, 0]
+            original_v = original_points[:, 2] - original_points[:, 0]
+            original_area2 = (
+                original_u[:, 0] * original_v[:, 1]
+                - original_u[:, 1] * original_v[:, 0]
+            )
+            local_points = local_coordinates[local_faces[horizontal], :2]
+            local_u = local_points[:, 1] - local_points[:, 0]
+            local_v = local_points[:, 2] - local_points[:, 0]
+            local_area2 = (
+                local_u[:, 0] * local_v[:, 1]
+                - local_u[:, 1] * local_v[:, 0]
+            )
+            changed = (local_area2 == 0) | (
+                np.signbit(local_area2) != np.signbit(original_area2)
+            )
+            changed_non_floor = changed & (face_planes[horizontal, 0] != 1)
+            if np.any(changed_non_floor):
+                raise RuntimeError(
+                    "Chunk-local float32 conversion damaged "
+                    f"{int(np.count_nonzero(changed_non_floor))} top/bottom "
+                    f"triangles in chunk {chunk_id}"
+                )
+            converted_horizontal_sign_changes += int(np.count_nonzero(changed))
+
+        mesh = bpy.data.meshes.new(
+            f"{old_mesh.name}_TiledExplicit_{row:03d}_{column:03d}"
+        )
+        mesh.vertices.add(len(local_coordinates))
+        mesh.vertices.foreach_set("co", local_coordinates.reshape(-1))
+        loop_vertices = local_faces.reshape(-1)
+        mesh.loops.add(len(loop_vertices))
+        mesh.loops.foreach_set("vertex_index", loop_vertices)
+        polygon_count = len(local_faces)
+        mesh.polygons.add(polygon_count)
+        mesh.polygons.foreach_set(
+            "loop_start", np.arange(polygon_count, dtype=np.int32) * 3
+        )
+        mesh.polygons.foreach_set(
+            "loop_total", np.full(polygon_count, 3, dtype=np.int32)
+        )
+        mesh.polygons.foreach_set(
+            "use_smooth", np.zeros(polygon_count, dtype=np.bool_)
+        )
+        for material in materials:
+            mesh.materials.append(material)
+        mesh.update(calc_edges=True)
+        mesh.calc_loop_triangles()
+        if len(mesh.loop_triangles) != polygon_count:
+            raise RuntimeError(
+                "Chunked explicit triangle mesh changed during Blender "
+                f"tessellation: {len(mesh.loop_triangles)} != {polygon_count}"
+            )
+
+        if sequence == 0:
+            obj = target
+            obj.data = mesh
+        else:
+            obj = target.copy()
+            obj.data = mesh
+            obj.name = base_name
+            for collection in target_collections:
+                collection.objects.link(obj)
+        obj.matrix_world = Matrix.Translation(
+            (
+                float(origin_dbu[0]) * dbu_um,
+                float(origin_dbu[1]) * dbu_um,
+                0.0,
+            )
+        )
+        obj["aim_cladding_undercut_method"] = "tiled_explicit_mesh"
+        obj["aim_explicit_topology_validated"] = True
+        obj["aim_explicit_chunk_size_um"] = chunk_size_um
+        obj["aim_explicit_chunk_index"] = sequence
+        obj["aim_explicit_triangle_count"] = polygon_count
+        created_objects.append(obj)
+        created_triangle_count += polygon_count
+        created_vertex_count += len(unique_vertices)
+
+    if created_triangle_count != triangle_count:
+        raise RuntimeError(
+            "Chunked explicit cladding lost triangles: "
+            f"{created_triangle_count} != {triangle_count}"
+        )
+    if old_mesh.users == 0:
+        bpy.data.meshes.remove(old_mesh)
+    bpy.context.view_layer.update()
+    print(
+        "Replaced solid cladding with spatially chunked explicit mesh: "
+        f"{len(created_objects)} objects, {created_vertex_count} chunk-local "
+        f"vertices, {created_triangle_count} triangles, "
+        f"chunk={chunk_size_um:g} um, "
+        f"horizontal float32 sign changes="
+        f"{converted_horizontal_sign_changes}, XY error={xy_error:g}, "
+        f"Z error={z_error:g}"
+    )
 
 
 def replace_with_unfractured_cutter_mesh(
@@ -1482,6 +1998,8 @@ def build_scene(args: argparse.Namespace) -> None:
             args.cladding_unfractured_cutter,
             "Unfractured cladding cutter sidecar",
         )
+    if args.cladding_explicit_mesh is not None:
+        require_file(args.cladding_explicit_mesh, "Explicit cladding mesh sidecar")
     require_blendergds_operator(bpy)
 
     if not args.no_clear_scene:
@@ -1511,6 +2029,7 @@ def build_scene(args: argparse.Namespace) -> None:
         import_stack_config = prepare_import_stack_config(
             args.stack_config,
             cladding_mode=args.cladding_mode,
+            cladding_undercut_method=args.cladding_undercut_method,
             temp_dir=Path(temp_name),
         )
         scene.gdsii_custom_config_path = str(import_stack_config)
@@ -1540,7 +2059,33 @@ def build_scene(args: argparse.Namespace) -> None:
     remove_render_layer_objects(bpy, delete_layers)
 
     if args.cladding_mode == "boolean":
-        if args.cladding_undercut_method == "unfractured_cutter":
+        if args.cladding_undercut_method == "tiled_explicit_mesh":
+            target = find_imported_layer_object(bpy, CLADDING_LAYER)
+            if target is None:
+                raise RuntimeError(
+                    "Tiled explicit cladding requires imported "
+                    f"L{CLADDING_LAYER}"
+                )
+            sidecar = load_tiled_explicit_cladding_sidecar(
+                args.cladding_explicit_mesh
+            )
+            if args.cladding_explicit_chunk_size_um > 0:
+                replace_with_spatially_chunked_cladding_mesh(
+                    bpy,
+                    target=target,
+                    sidecar=sidecar,
+                    z_scale=args.z_scale,
+                    chunk_size_um=args.cladding_explicit_chunk_size_um,
+                )
+            else:
+                replace_with_tiled_explicit_cladding_mesh(
+                    bpy,
+                    target=target,
+                    sidecar=sidecar,
+                    z_scale=args.z_scale,
+                )
+            applied = True
+        elif args.cladding_undercut_method == "unfractured_cutter":
             applied = apply_unfractured_cladding_boolean(
                 bpy,
                 sidecar_path=args.cladding_unfractured_cutter,
@@ -1554,7 +2099,7 @@ def build_scene(args: argparse.Namespace) -> None:
                 solver=args.cladding_boolean_solver,
                 apply_modifier=args.apply_cladding_boolean,
             )
-        print(f"Applied cladding boolean: {applied}")
+        print(f"Applied cladding geometry: {applied}")
     elif args.cladding_mode == "solid":
         print("Kept solid cladding without an undercut opening")
     else:

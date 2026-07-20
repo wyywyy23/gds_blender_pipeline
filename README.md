@@ -644,6 +644,41 @@ is rejected unless its topology was validated during generation. The Blender
 builder extrudes those boundaries through the cladding, bakes the Boolean, and
 snaps the resulting horizontal cladding planes while enforcing flat shading.
 
+For layouts whose very large Boolean result produces invalid Blender n-gon
+tessellation, `tiled_explicit_mesh` avoids the Blender Boolean entirely. It
+constructs the final lower cladding, passivation floor, upper cladding, and
+vertical boundary walls as an explicitly triangulated watertight mesh. Planar
+domains are tessellated in bounded tiles; adjacent tiles share coplanar edges
+without adding internal walls. The generator verifies triangle area and global
+closed, consistently oriented edge topology before writing the sidecar. This
+path is opt-in; `fractured_batches` remains the default.
+
+```sh
+conda run -n gds-blender-pipeline python \
+  scripts/aim_generate_tiled_cladding_mesh.py \
+  --gds examples/aim/visual/trx_top.visual.gds \
+  --output .local/hpc/input/trx_top.tiled_explicit_cladding.npz \
+  --tile-size-um 200
+
+blender --background --python scripts/aim_build_blender_scene.py -- \
+  --gds examples/aim/visual/trx_top.visual.gds \
+  --stack-config configs/blender/aim.yaml \
+  --color-config configs/blender/colors/aim/realistic.yaml \
+  --output examples/aim/blender/trx_top.realistic.tiled_explicit.blend \
+  --cladding-undercut-method tiled_explicit_mesh \
+  --cladding-explicit-mesh \
+    .local/hpc/input/trx_top.tiled_explicit_cladding.npz \
+  --no-merge-layers
+```
+
+For large-coordinate layouts with nanometer-scale boundary segments, add
+`--cladding-explicit-chunk-size-um 400` to store the same triangles in spatial
+objects with chunk-local coordinates. This opt-in representation reduces
+Blender/Cycles float32 precision loss without changing world geometry, material,
+or shadow visibility. Chunk objects retain the layer's base name with Blender
+numeric suffixes, so render-preset layer visibility continues to treat them as
+one layer.
+
 ### Removing Large Layers
 
 Remove additional imported layers from the saved `.blend` with repeated or
@@ -728,6 +763,10 @@ All variables can be overridden on the command line as shown in the examples.
 | `AIM_BLENDER_CAMERA_FIT_MARGIN` | `1.10` | Automatic camera-fit margin |
 | `AIM_BLENDER_CLADDING_MODE` | `boolean` | `boolean`, `solid`, or `omit` |
 | `AIM_BLENDER_CLADDING_BOOLEAN_SOLVER` | `manifold` | `manifold` low-memory default or `exact` diagnostic fallback |
+| `AIM_BLENDER_CLADDING_UNDERCUT_METHOD` | `fractured_batches` | Default fragmented Boolean, `unfractured_cutter`, or opt-in `tiled_explicit_mesh` |
+| `AIM_BLENDER_CLADDING_UNFRACTURED_CUTTER` | empty | Logical-opening sidecar for `unfractured_cutter` |
+| `AIM_BLENDER_CLADDING_EXPLICIT_MESH` | empty | Validated final cladding sidecar for `tiled_explicit_mesh` |
+| `AIM_BLENDER_CLADDING_EXPLICIT_CHUNK_SIZE_UM` | `0` | Optional local-coordinate chunk size for the explicit mesh; `0` keeps one object |
 | `AIM_BLENDER_APPLY_CLADDING_BOOLEAN` | `1` | Bake Boolean batches sequentially; set to `0` to keep live modifiers |
 | `AIM_BLENDER_DELETE_LAYERS` | empty | Imported layers to remove |
 
