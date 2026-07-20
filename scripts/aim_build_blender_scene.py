@@ -41,6 +41,8 @@ CLADDING_CUTTER_LAYERS = (
 )
 CLADDING_MODES = ("boolean", "solid", "omit")
 CLADDING_BOOLEAN_SOLVERS = ("manifold", "exact")
+CLADDING_UNDERCUT_METHODS = ("fractured_batches", "unfractured_cutter")
+CLADDING_UNFRACTURED_CUTTER_FORMAT_VERSION = 1
 
 
 def positive_float(value: str) -> float:
@@ -188,6 +190,25 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "fallback"
         ),
     )
+    parser.add_argument(
+        "--cladding-undercut-method",
+        choices=CLADDING_UNDERCUT_METHODS,
+        default="fractured_batches",
+        help=(
+            "TUAM subtraction method. fractured_batches preserves the default "
+            "GDS-fragment workflow; unfractured_cutter performs one Boolean "
+            "from complete logical openings supplied by a sidecar"
+        ),
+    )
+    parser.add_argument(
+        "--cladding-unfractured-cutter",
+        type=Path,
+        default=None,
+        help=(
+            "Validated .npz logical-opening cutter sidecar required by "
+            "--cladding-undercut-method unfractured_cutter"
+        ),
+    )
     boolean_storage = parser.add_mutually_exclusive_group()
     boolean_storage.add_argument(
         "--apply-cladding-boolean",
@@ -261,10 +282,35 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("--apply-cladding-boolean requires --cladding-mode boolean")
     if args.apply_cladding_boolean is None:
         args.apply_cladding_boolean = args.cladding_mode == "boolean"
+    if args.cladding_undercut_method != "fractured_batches":
+        if args.cladding_mode != "boolean":
+            parser.error(
+                "--cladding-undercut-method unfractured_cutter requires "
+                "--cladding-mode boolean"
+            )
+        if args.cladding_unfractured_cutter is None:
+            parser.error(
+                "--cladding-undercut-method unfractured_cutter requires "
+                "--cladding-unfractured-cutter"
+            )
+        if not args.apply_cladding_boolean:
+            parser.error(
+                "--cladding-undercut-method unfractured_cutter currently "
+                "requires baked Booleans"
+            )
+    elif args.cladding_unfractured_cutter is not None:
+        parser.error(
+            "--cladding-unfractured-cutter requires "
+            "--cladding-undercut-method unfractured_cutter"
+        )
 
     args.gds = args.gds.resolve()
     args.stack_config = args.stack_config.resolve()
     args.color_config = args.color_config.resolve()
+    if args.cladding_unfractured_cutter is not None:
+        args.cladding_unfractured_cutter = (
+            args.cladding_unfractured_cutter.resolve()
+        )
     args.output = (
         default_output_blend(args.gds).resolve()
         if args.output is None
@@ -686,6 +732,256 @@ def object_world_z_bounds(obj: Any) -> tuple[float, float]:
     return min(z_values), max(z_values)
 
 
+def object_world_xy_bounds(obj: Any) -> tuple[float, float, float, float]:
+    from mathutils import Vector
+
+    points = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+    return (
+        min(point.x for point in points),
+        min(point.y for point in points),
+        max(point.x for point in points),
+        max(point.y for point in points),
+    )
+
+
+def load_unfractured_cutter_sidecar(path: Path) -> dict[str, Any]:
+    import numpy as np
+
+    required = {
+        "format_version",
+        "xy_dbu",
+        "triangles",
+        "boundary_edges",
+        "component_triangle_offsets",
+        "dbu_um",
+        "logical_component_count",
+        "validated_closed_planar_topology",
+    }
+    with np.load(path, allow_pickle=False) as archive:
+        missing = required - set(archive.files)
+        if missing:
+            raise ValueError(
+                f"Unfractured cutter sidecar is missing: {sorted(missing)}"
+            )
+        data = {name: archive[name].copy() for name in required}
+
+    def scalar(name: str) -> Any:
+        values = data[name].reshape(-1)
+        if len(values) != 1:
+            raise ValueError(f"Sidecar {name} must contain one value")
+        return values[0]
+
+    version = int(scalar("format_version"))
+    if version != CLADDING_UNFRACTURED_CUTTER_FORMAT_VERSION:
+        raise ValueError(
+            f"Unsupported unfractured cutter format {version}; expected "
+            f"{CLADDING_UNFRACTURED_CUTTER_FORMAT_VERSION}"
+        )
+    if int(scalar("validated_closed_planar_topology")) != 1:
+        raise ValueError("Unfractured cutter sidecar is not topology-validated")
+
+    xy_dbu = data["xy_dbu"]
+    triangles = data["triangles"]
+    boundary_edges = data["boundary_edges"]
+    offsets = data["component_triangle_offsets"]
+    dbu_um = float(scalar("dbu_um"))
+    component_count = int(scalar("logical_component_count"))
+    if xy_dbu.ndim != 2 or xy_dbu.shape[1] != 2 or len(xy_dbu) < 3:
+        raise ValueError(f"Invalid sidecar xy_dbu shape: {xy_dbu.shape}")
+    if triangles.ndim != 2 or triangles.shape[1] != 3 or len(triangles) == 0:
+        raise ValueError(f"Invalid sidecar triangles shape: {triangles.shape}")
+    if (
+        boundary_edges.ndim != 2
+        or boundary_edges.shape[1] != 2
+        or len(boundary_edges) == 0
+    ):
+        raise ValueError(
+            f"Invalid sidecar boundary_edges shape: {boundary_edges.shape}"
+        )
+    if dbu_um <= 0 or not np.isfinite(dbu_um):
+        raise ValueError(f"Invalid sidecar database unit: {dbu_um}")
+    if component_count <= 0 or offsets.shape != (component_count + 1,):
+        raise ValueError(
+            "Invalid sidecar component offsets: "
+            f"components={component_count}, offsets={offsets.shape}"
+        )
+    if offsets[0] != 0 or offsets[-1] != len(triangles) or np.any(np.diff(offsets) <= 0):
+        raise ValueError("Invalid sidecar component triangle ranges")
+    for name, indices in (
+        ("triangles", triangles),
+        ("boundary_edges", boundary_edges),
+    ):
+        if np.any(indices < 0) or np.any(indices >= len(xy_dbu)):
+            raise ValueError(f"Sidecar {name} contains out-of-range indices")
+
+    print(
+        "Loaded validated unfractured cutter sidecar: "
+        f"{path} ({component_count} logical openings, {len(xy_dbu)} vertices, "
+        f"{len(triangles)} planar triangles, {len(boundary_edges)} boundary edges)"
+    )
+    return {
+        "xy_dbu": xy_dbu.astype(np.float64, copy=False),
+        "triangles": triangles.astype(np.int32, copy=False),
+        "boundary_edges": boundary_edges.astype(np.int32, copy=False),
+        "dbu_um": dbu_um,
+        "component_count": component_count,
+    }
+
+
+def replace_with_unfractured_cutter_mesh(
+    bpy: Any,
+    *,
+    cutter: Any,
+    target: Any,
+    sidecar: dict[str, Any],
+    margin: float = 1.0,
+) -> tuple[float, float]:
+    import numpy as np
+
+    bpy.context.view_layer.update()
+    source_bounds = np.asarray(object_world_xy_bounds(cutter), dtype=np.float64)
+    xy_world = sidecar["xy_dbu"] * sidecar["dbu_um"]
+    generated_bounds = np.asarray(
+        (
+            xy_world[:, 0].min(),
+            xy_world[:, 1].min(),
+            xy_world[:, 0].max(),
+            xy_world[:, 1].max(),
+        ),
+        dtype=np.float64,
+    )
+    tolerance = max(1.0e-4, sidecar["dbu_um"] * 2.0)
+    bound_error = float(np.max(np.abs(source_bounds - generated_bounds)))
+    if bound_error > tolerance:
+        raise RuntimeError(
+            "Unfractured cutter does not match imported TUAM bounds: "
+            f"source={source_bounds.tolist()}, "
+            f"generated={generated_bounds.tolist()}, max_error={bound_error:g}"
+        )
+
+    target_zmin, target_zmax = object_world_z_bounds(target)
+    desired_zmin = target_zmin - margin
+    desired_zmax = target_zmax + margin
+    triangles = sidecar["triangles"]
+    boundary_edges = sidecar["boundary_edges"]
+    planar_vertex_count = len(xy_world)
+
+    world_coordinates = np.empty((planar_vertex_count * 2, 4), dtype=np.float64)
+    world_coordinates[:, 3] = 1.0
+    world_coordinates[:planar_vertex_count, :2] = xy_world
+    world_coordinates[planar_vertex_count:, :2] = xy_world
+    world_coordinates[:planar_vertex_count, 2] = desired_zmin
+    world_coordinates[planar_vertex_count:, 2] = desired_zmax
+    inverse = np.asarray(
+        [list(row) for row in cutter.matrix_world.inverted()], dtype=np.float64
+    )
+    local_coordinates = (world_coordinates @ inverse.T)[:, :3].astype(np.float32)
+
+    bottom_triangles = triangles[:, (2, 1, 0)]
+    top_triangles = triangles + planar_vertex_count
+    bottom_edges = boundary_edges
+    top_edges = boundary_edges + planar_vertex_count
+    side_quads = np.column_stack(
+        (
+            bottom_edges[:, 0],
+            bottom_edges[:, 1],
+            top_edges[:, 1],
+            top_edges[:, 0],
+        )
+    ).astype(np.int32, copy=False)
+    loop_vertices = np.concatenate(
+        (
+            bottom_triangles.reshape(-1),
+            top_triangles.reshape(-1),
+            side_quads.reshape(-1),
+        )
+    ).astype(np.int32, copy=False)
+    polygon_count = len(bottom_triangles) + len(top_triangles) + len(side_quads)
+    loop_totals = np.empty(polygon_count, dtype=np.int32)
+    loop_totals[: len(bottom_triangles) + len(top_triangles)] = 3
+    loop_totals[len(bottom_triangles) + len(top_triangles) :] = 4
+    loop_starts = np.empty(polygon_count, dtype=np.int32)
+    loop_starts[0] = 0
+    np.cumsum(loop_totals[:-1], out=loop_starts[1:])
+
+    old_mesh = cutter.data
+    mesh = bpy.data.meshes.new(f"{old_mesh.name}_Unfractured")
+    mesh.vertices.add(len(local_coordinates))
+    mesh.vertices.foreach_set("co", local_coordinates.reshape(-1))
+    mesh.loops.add(len(loop_vertices))
+    mesh.loops.foreach_set("vertex_index", loop_vertices)
+    mesh.polygons.add(polygon_count)
+    mesh.polygons.foreach_set("loop_start", loop_starts)
+    mesh.polygons.foreach_set("loop_total", loop_totals)
+    mesh.polygons.foreach_set(
+        "use_smooth", np.zeros(polygon_count, dtype=np.bool_)
+    )
+    for material in old_mesh.materials:
+        mesh.materials.append(material)
+    mesh.update(calc_edges=True)
+    cutter.data = mesh
+    if old_mesh.users == 0:
+        bpy.data.meshes.remove(old_mesh)
+    cutter["aim_cladding_undercut_method"] = "unfractured_cutter"
+    cutter["aim_logical_opening_count"] = sidecar["component_count"]
+    cutter["aim_planar_topology_validated"] = True
+    bpy.context.view_layer.update()
+    print(
+        "Replaced fractured TUAM mesh with complete logical cutter prisms: "
+        f"{sidecar['component_count']} openings, "
+        f"{len(local_coordinates)} vertices, {polygon_count} faces; "
+        f"world z=[{desired_zmin:.3f}, {desired_zmax:.3f}], "
+        f"XY bound error={bound_error:g}"
+    )
+    return target_zmin, target_zmax
+
+
+def snap_mesh_world_z_planes(
+    obj: Any,
+    *,
+    planes: tuple[float, ...],
+    tolerance: float = 2.0e-3,
+) -> int:
+    import numpy as np
+
+    if not planes or len(obj.data.vertices) == 0:
+        return 0
+    coordinates = np.empty(len(obj.data.vertices) * 3, dtype=np.float32)
+    obj.data.vertices.foreach_get("co", coordinates)
+    coordinates = coordinates.reshape((-1, 3))
+    matrix = np.asarray([list(row) for row in obj.matrix_world], dtype=np.float64)
+    world_z = (
+        coordinates[:, 0] * matrix[2, 0]
+        + coordinates[:, 1] * matrix[2, 1]
+        + coordinates[:, 2] * matrix[2, 2]
+        + matrix[2, 3]
+    )
+    plane_values = np.asarray(planes, dtype=np.float64)
+    errors = np.abs(world_z[:, None] - plane_values[None, :])
+    nearest = np.argmin(errors, axis=1)
+    corrections = plane_values[nearest] - world_z
+    selected = np.abs(corrections) <= tolerance
+    count = int(np.count_nonzero(selected))
+    maximum = float(np.max(np.abs(corrections[selected]))) if count else 0.0
+    if count:
+        if abs(matrix[2, 2]) < 1.0e-12:
+            raise RuntimeError(f"Cannot snap world Z for transformed object {obj.name}")
+        coordinates[selected, 2] += (
+            corrections[selected] / matrix[2, 2]
+        ).astype(np.float32)
+        obj.data.vertices.foreach_set("co", coordinates.reshape(-1))
+    obj.data.polygons.foreach_set(
+        "use_smooth", np.zeros(len(obj.data.polygons), dtype=np.bool_)
+    )
+    obj.data.update()
+    print(
+        f"Snapped {count} vertices on {obj.name} to horizontal planes "
+        f"{[round(value, 6) for value in planes]} "
+        f"(max correction {maximum:g}); forced flat shading"
+    )
+    return count
+
+
 def extend_cutter_z_through_target(
     bpy: Any,
     *,
@@ -922,12 +1218,34 @@ def add_cladding_cutter_boolean(
     return batch_count
 
 
+def add_unfractured_cladding_boolean(
+    bpy: Any,
+    *,
+    target: Any,
+    cutter: Any,
+    solver: str,
+) -> None:
+    modifier = target.modifiers.new("Cladding_Undercut_Unfractured", "BOOLEAN")
+    modifier.operation = "DIFFERENCE"
+    modifier.object = cutter
+    modifier.solver = solver.upper()
+    modifier.show_viewport = True
+    modifier.show_render = True
+    bpy.ops.object.modifier_apply(modifier=modifier.name)
+    print(
+        f"Applied one {solver.upper()} unfractured cladding Boolean: "
+        f"{cutter.name} -> {target.name}"
+    )
+
+
 def apply_cladding_boolean(
     bpy: Any,
     *,
     show_cutter: bool,
     solver: str,
     apply_modifier: bool,
+    cutter_layers: tuple[str, ...] = CLADDING_CUTTER_LAYERS,
+    recalculate_target: bool = True,
 ) -> bool:
     target = find_imported_layer_object(bpy, CLADDING_LAYER)
 
@@ -938,7 +1256,8 @@ def apply_cladding_boolean(
     bpy.ops.object.select_all(action="DESELECT")
     target.select_set(True)
     bpy.context.view_layer.objects.active = target
-    recalculate_mesh_normals(target)
+    if recalculate_target:
+        recalculate_mesh_normals(target)
 
     cutter_specs = (
         {
@@ -958,6 +1277,8 @@ def apply_cladding_boolean(
     applied_modifiers = 0
 
     for spec in cutter_specs:
+        if spec["layer"] not in cutter_layers:
+            continue
         cutter = find_imported_layer_object(bpy, spec["layer"])
         if cutter is None:
             print(f"Skipping cladding cutter not present in scene: L{spec['layer']}")
@@ -991,6 +1312,75 @@ def apply_cladding_boolean(
         f"{applied_modifiers} modifiers"
     )
     return applied_cutters > 0
+
+
+def apply_unfractured_cladding_boolean(
+    bpy: Any,
+    *,
+    sidecar_path: Path,
+    show_cutter: bool,
+    solver: str,
+) -> bool:
+    target = find_imported_layer_object(bpy, CLADDING_LAYER)
+    cutter = find_imported_layer_object(bpy, CLADDING_UNDERCUT_CUTTER_LAYER)
+    if target is None:
+        print("Skipping cladding boolean: LCLADDING_RENDER not found")
+        return False
+    if cutter is None:
+        raise RuntimeError(
+            "Unfractured cutter method requires imported "
+            f"L{CLADDING_UNDERCUT_CUTTER_LAYER}"
+        )
+
+    bpy.ops.object.select_all(action="DESELECT")
+    target.select_set(True)
+    bpy.context.view_layer.objects.active = target
+    recalculate_mesh_normals(target)
+    sidecar = load_unfractured_cutter_sidecar(sidecar_path)
+    target_zmin, target_zmax = replace_with_unfractured_cutter_mesh(
+        bpy,
+        cutter=cutter,
+        target=target,
+        sidecar=sidecar,
+    )
+    add_unfractured_cladding_boolean(
+        bpy,
+        target=target,
+        cutter=cutter,
+        solver=solver,
+    )
+    snap_mesh_world_z_planes(target, planes=(target_zmin, target_zmax))
+
+    if show_cutter:
+        print(f"Kept cladding cutter visible: {cutter.name}")
+    else:
+        cutter.hide_viewport = True
+        cutter.hide_render = True
+        print(f"Hid cladding cutter object: {cutter.name}")
+
+    passivation = find_imported_layer_object(
+        bpy, CLADDING_PASSIVATION_CUTTER_LAYER
+    )
+    passivation_zmin = None
+    if passivation is not None:
+        passivation_zmin, _ = object_world_z_bounds(passivation)
+    applied_passivation = apply_cladding_boolean(
+        bpy,
+        show_cutter=show_cutter,
+        solver=solver,
+        apply_modifier=True,
+        cutter_layers=(CLADDING_PASSIVATION_CUTTER_LAYER,),
+        recalculate_target=False,
+    )
+    final_planes = (target_zmin, target_zmax)
+    if applied_passivation and passivation_zmin is not None:
+        final_planes += (passivation_zmin,)
+    snap_mesh_world_z_planes(target, planes=final_planes)
+    print(
+        "Cladding Boolean summary: 1 unfractured TUAM cutter, "
+        f"PAAM applied={applied_passivation}"
+    )
+    return True
 
 
 def remove_pn_conflict_debug_objects(bpy: Any) -> int:
@@ -1087,6 +1477,11 @@ def build_scene(args: argparse.Namespace) -> None:
     require_file(args.gds, "Input GDS")
     require_file(args.stack_config, "BlenderGDS stack config")
     require_file(args.color_config, "BlenderGDS color config")
+    if args.cladding_unfractured_cutter is not None:
+        require_file(
+            args.cladding_unfractured_cutter,
+            "Unfractured cladding cutter sidecar",
+        )
     require_blendergds_operator(bpy)
 
     if not args.no_clear_scene:
@@ -1104,6 +1499,7 @@ def build_scene(args: argparse.Namespace) -> None:
     print(f"Cladding mode:      {args.cladding_mode}")
     if args.cladding_mode == "boolean":
         print(f"Cladding solver:    {args.cladding_boolean_solver.upper()}")
+        print(f"Undercut method:    {args.cladding_undercut_method}")
         print(
             "Cladding storage:   "
             + ("baked" if args.apply_cladding_boolean else "live modifiers")
@@ -1144,12 +1540,20 @@ def build_scene(args: argparse.Namespace) -> None:
     remove_render_layer_objects(bpy, delete_layers)
 
     if args.cladding_mode == "boolean":
-        applied = apply_cladding_boolean(
-            bpy,
-            show_cutter=args.show_cladding_cutter,
-            solver=args.cladding_boolean_solver,
-            apply_modifier=args.apply_cladding_boolean,
-        )
+        if args.cladding_undercut_method == "unfractured_cutter":
+            applied = apply_unfractured_cladding_boolean(
+                bpy,
+                sidecar_path=args.cladding_unfractured_cutter,
+                show_cutter=args.show_cladding_cutter,
+                solver=args.cladding_boolean_solver,
+            )
+        else:
+            applied = apply_cladding_boolean(
+                bpy,
+                show_cutter=args.show_cladding_cutter,
+                solver=args.cladding_boolean_solver,
+                apply_modifier=args.apply_cladding_boolean,
+            )
         print(f"Applied cladding boolean: {applied}")
     elif args.cladding_mode == "solid":
         print("Kept solid cladding without an undercut opening")

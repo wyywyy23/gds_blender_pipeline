@@ -17,6 +17,7 @@ from aim_render_scene import (
     apply_color_management,
     apply_lighting,
     apply_render_settings,
+    apply_run_shadow_visibility,
     apply_run_visibility,
     blender_argv,
     load_preset,
@@ -126,6 +127,7 @@ def prepare_render_blend(args: argparse.Namespace) -> None:
     apply_color_management(scene, preset["color_management"])
     apply_render_settings(scene, preset["render"])
     hidden_objects = apply_run_visibility(run, resolved_layers)
+    shadowless_objects = apply_run_shadow_visibility(run, resolved_layers)
 
     scene.render.filepath = args.render_output or default_render_output(output)
     scene["aim_render_preset"] = preset["name"]
@@ -133,6 +135,7 @@ def prepare_render_blend(args: argparse.Namespace) -> None:
     scene["aim_source_blend"] = source.name
     print(
         f"Prepared run {run['name']}: hidden={hidden_objects or 'none'}, "
+        f"shadow_disabled={shadowless_objects or 'none'}, "
         f"render_output={scene.render.filepath}"
     )
 

@@ -613,6 +613,37 @@ AIM_BLENDER_APPLY_CLADDING_BOOLEAN=0 \
 make aim-blender-scene-example
 ```
 
+For layouts where sequential TUAM fragment batches leave visible shading
+artifacts, an opt-in logical-opening path reconstructs the merged TUAM regions
+before extrusion. It creates one watertight prism per complete opening, combines
+those independent prisms into one cutter, and applies one undercut Boolean. PAAM
+continues to use the bounded passivation-cap Boolean above. The default remains
+`fractured_batches`, so existing disk-array builds are unchanged.
+
+Generate and use the validated sidecar like this:
+
+```sh
+conda run -n gds-blender-pipeline python \
+  scripts/aim_generate_unfractured_cladding_cutter.py \
+  --gds examples/aim/visual/trx_top.visual.gds \
+  --output .local/hpc/input/trx_top.unfractured_cutter.npz
+
+blender --background --python scripts/aim_build_blender_scene.py -- \
+  --gds examples/aim/visual/trx_top.visual.gds \
+  --stack-config configs/blender/aim.yaml \
+  --color-config configs/blender/colors/aim/realistic.yaml \
+  --output examples/aim/blender/trx_top.realistic.unfractured.blend \
+  --cladding-undercut-method unfractured_cutter \
+  --cladding-unfractured-cutter \
+    .local/hpc/input/trx_top.unfractured_cutter.npz \
+  --no-merge-layers
+```
+
+The sidecar records complete planar triangles and directed boundary loops and
+is rejected unless its topology was validated during generation. The Blender
+builder extrudes those boundaries through the cladding, bakes the Boolean, and
+snaps the resulting horizontal cladding planes while enforcing flat shading.
+
 ### Removing Large Layers
 
 Remove additional imported layers from the saved `.blend` with repeated or

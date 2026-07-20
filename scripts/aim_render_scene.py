@@ -210,7 +210,25 @@ def load_preset(path: Path) -> dict[str, Any]:
         ):
             raise ValueError(f"runs[{index}].hide_layers must be a list of names")
         layers = list(dict.fromkeys(normalize_layer_name(layer) for layer in layers_any))
-        runs.append({"name": run_name, "hide_layers": layers})
+        shadow_layers_any = run_data.get("disable_shadow_layers", [])
+        if not isinstance(shadow_layers_any, list) or not all(
+            isinstance(layer, str) and layer.strip() for layer in shadow_layers_any
+        ):
+            raise ValueError(
+                f"runs[{index}].disable_shadow_layers must be a list of names"
+            )
+        shadow_layers = list(
+            dict.fromkeys(
+                normalize_layer_name(layer) for layer in shadow_layers_any
+            )
+        )
+        runs.append(
+            {
+                "name": run_name,
+                "hide_layers": layers,
+                "disable_shadow_layers": shadow_layers,
+            }
+        )
 
     return {
         "name": name,
@@ -241,7 +259,10 @@ def resolve_layer_objects(scene: Any, layer_name: str) -> list[Any]:
 def resolve_run_layer_objects(scene: Any, run: dict[str, Any]) -> dict[str, list[Any]]:
     """Resolve and validate every render layer referenced by one preset run."""
     resolved: dict[str, list[Any]] = {}
-    for layer_name in run["hide_layers"]:
+    layer_names = dict.fromkeys(
+        [*run["hide_layers"], *run["disable_shadow_layers"]]
+    )
+    for layer_name in layer_names:
         objects = resolve_layer_objects(scene, layer_name)
         if not objects:
             raise ValueError(f"Preset layer {layer_name} is not present in the scene")
@@ -259,6 +280,22 @@ def apply_run_visibility(
             obj.hide_render = True
             hidden_objects.append(obj.name)
     return hidden_objects
+
+
+def apply_run_shadow_visibility(
+    run: dict[str, Any], resolved_layers: dict[str, list[Any]]
+) -> list[str]:
+    """Disable Cycles shadow-ray visibility for selected render-layer objects."""
+    shadowless_objects: list[str] = []
+    for layer_name in run["disable_shadow_layers"]:
+        for obj in resolved_layers[layer_name]:
+            if not hasattr(obj, "visible_shadow"):
+                raise ValueError(
+                    f"Object {obj.name} does not support Cycles shadow visibility"
+                )
+            obj.visible_shadow = False
+            shadowless_objects.append(obj.name)
+    return shadowless_objects
 
 
 def select_runs(
@@ -409,12 +446,20 @@ def render_preset(args: argparse.Namespace) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
     extension = FORMAT_EXTENSIONS[preset["render"]["file_format"]]
     baseline_visibility = {obj: obj.hide_render for obj in scene.objects}
+    baseline_shadow_visibility = {
+        obj: obj.visible_shadow
+        for obj in scene.objects
+        if hasattr(obj, "visible_shadow")
+    }
 
     try:
         for run in runs:
             for obj, hidden in baseline_visibility.items():
                 obj.hide_render = hidden
+            for obj, visible_shadow in baseline_shadow_visibility.items():
+                obj.visible_shadow = visible_shadow
             hidden_objects = apply_run_visibility(run, resolved_layers)
+            shadowless_objects = apply_run_shadow_visibility(run, resolved_layers)
 
             filename = (
                 f"{blend_stem}.{preset['name']}.{run['name']}{extension}"
@@ -423,6 +468,7 @@ def render_preset(args: argparse.Namespace) -> None:
             scene.render.filepath = str(output_path)
             print(
                 f"Render run {run['name']}: hidden={hidden_objects or 'none'}, "
+                f"shadow_disabled={shadowless_objects or 'none'}, "
                 f"output={output_path}"
             )
             if not args.dry_run:
@@ -434,6 +480,8 @@ def render_preset(args: argparse.Namespace) -> None:
     finally:
         for obj, hidden in baseline_visibility.items():
             obj.hide_render = hidden
+        for obj, visible_shadow in baseline_shadow_visibility.items():
+            obj.visible_shadow = visible_shadow
 
     print(
         f"{'Validated' if args.dry_run else 'Completed'} "

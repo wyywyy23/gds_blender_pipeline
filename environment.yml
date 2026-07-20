@@ -11,3 +11,4 @@ dependencies:
   - pyyaml
   - pip:
       - gdsfactory
+      - shapely>=2.1
