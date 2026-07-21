@@ -252,7 +252,27 @@ def add_region(
         return
 
     layer_index = c_out.kcl.layout.layer(*layer)
-    c_out.kdb_cell.shapes(layer_index).insert(region)
+    insert_simple_region_shapes(c_out.kdb_cell.shapes(layer_index), region)
+
+
+def insert_simple_region_shapes(shapes: Any, region: kdb.Region) -> None:
+    """Insert a region without emitting weakly-simple GDS boundaries.
+
+    GDSII boundaries cannot represent holes directly. KLayout otherwise
+    resolves a holed polygon into weakly-simple boundaries during export,
+    which can still revisit vertices after a minimum-coherence merge.
+    ``break_polygons`` can also leave holeless hulls that revisit a junction.
+    Keep ordinary polygons intact and decompose only those two cases into
+    simple trapezoids.
+    """
+    for polygon in region.each():
+        hull_points = [(point.x, point.y) for point in polygon.each_point_hull()]
+        has_repeated_hull_point = len(set(hull_points)) != len(hull_points)
+        if polygon.holes() == 0 and not has_repeated_hull_point:
+            shapes.insert(polygon)
+            continue
+        for piece in polygon.decompose_trapezoids():
+            shapes.insert(piece)
 
 
 def component_from_region(
@@ -274,6 +294,17 @@ def count_region_polygons(region: kdb.Region) -> int:
 
 def max_region_polygon_vertices(region: kdb.Region) -> int:
     return max((polygon.num_points() for polygon in region.each()), default=0)
+
+
+def merge_region(region: kdb.Region) -> kdb.Region:
+    """Merge overlaps and shared edges without joining kissing corners.
+
+    KLayout's default maximum-coherence merge can encode polygons that touch
+    only at one point as a single weakly-simple boundary with a repeated
+    junction vertex. BlenderGDS expects strictly simple boundaries, so use
+    minimum coherence consistently throughout preprocessing.
+    """
+    return region.merged(True, 0)
 
 
 def fracture_output_regions(
@@ -318,7 +349,7 @@ def fracture_output_regions(
         layer_index = c_out.kcl.layout.layer(*layer)
         shapes = c_out.kdb_cell.shapes(layer_index)
         shapes.clear()
-        shapes.insert(region)
+        insert_simple_region_shapes(shapes, region)
 
         stats["layers"] += 1
         stats["polygons_before"] += polygons_before
@@ -334,7 +365,7 @@ def fracture_output_regions(
 
 
 def region_for_layer(c: gf.Component, layer: tuple[int, int]) -> kdb.Region:
-    return c.get_region(layer, merge=True).merged()
+    return merge_region(c.get_region(layer, merge=False))
 
 
 def build_input_regions(
@@ -389,7 +420,7 @@ def offset_region_with_gdsfactory(
     if join == "round" and not out.is_empty():
         radius = abs(microns_to_dbu(distance, dbu))
         if radius > 0:
-            out = out.rounded_corners(radius, radius, tolerance).merged()
+            out = merge_region(out.rounded_corners(radius, radius, tolerance))
 
     return out
 
@@ -415,7 +446,7 @@ def apply_region_offset(
 
     distance_dbu = microns_to_dbu(float(distance), dbu)
     if distance_dbu == 0:
-        return region.dup().merged()
+        return merge_region(region.dup())
 
     join = operation.get("join", "miter")
     if join not in {"miter", "bevel", "round"}:
@@ -429,13 +460,15 @@ def apply_region_offset(
             f"derived_regions.{region_name} offset tolerance must be an integer"
         )
 
-    return offset_region_with_gdsfactory(
-        region,
-        distance=float(distance),
-        join=join,
-        tolerance=tolerance,
-        dbu=dbu,
-    ).merged()
+    return merge_region(
+        offset_region_with_gdsfactory(
+            region,
+            distance=float(distance),
+            join=join,
+            tolerance=tolerance,
+            dbu=dbu,
+        )
+    )
 
 
 def build_derived_regions(
@@ -479,7 +512,7 @@ def build_derived_regions(
                 region_name=name,
             )
 
-        derived_regions[name] = region.merged()
+        derived_regions[name] = merge_region(region)
 
     return derived_regions
 
@@ -504,19 +537,19 @@ def evaluate_region_expression(
             left = eval_node(node.left)
             right = eval_node(node.right)
             if isinstance(node.op, ast.BitOr):
-                return (left | right).merged()
+                return merge_region(left | right)
             if isinstance(node.op, ast.BitAnd):
-                return (left & right).merged()
+                return merge_region(left & right)
             if isinstance(node.op, ast.Sub):
-                return (left - right).merged()
+                return merge_region(left - right)
             if isinstance(node.op, ast.BitXor):
-                return (left ^ right).merged()
+                return merge_region(left ^ right)
 
         raise ValueError(
             f"Unsupported region expression syntax: {ast.dump(node, include_attributes=False)}"
         )
 
-    return eval_node(tree).merged()
+    return merge_region(eval_node(tree))
 
 
 def index_silicon_render_layers(
@@ -624,7 +657,7 @@ def marker_applies_to_slice(
 def union_regions(regions: list[kdb.Region]) -> kdb.Region:
     out = kdb.Region()
     for region in regions:
-        out = (out | region).merged()
+        out = merge_region(out | region)
     return out
 
 
@@ -635,9 +668,9 @@ def resolve_same_polarity_regions(
     higher = kdb.Region()
 
     for rank in sorted(rank_regions, reverse=True):
-        region = (rank_regions[rank] - higher).merged()
+        region = merge_region(rank_regions[rank] - higher)
         resolved[rank] = region
-        higher = (higher | rank_regions[rank]).merged()
+        higher = merge_region(higher | rank_regions[rank])
 
     return resolved
 
@@ -689,11 +722,11 @@ def resolve_silicon_slice_regions(
         if marker_name not in input_regions:
             raise KeyError(f"Doping marker input layer missing: {marker_name}")
 
-        marker_region = (body_region & input_regions[marker_name]).merged()
+        marker_region = merge_region(body_region & input_regions[marker_name])
         if rank in rank_regions[polarity]:
-            rank_regions[polarity][rank] = (
+            rank_regions[polarity][rank] = merge_region(
                 rank_regions[polarity][rank] | marker_region
-            ).merged()
+            )
         else:
             rank_regions[polarity][rank] = marker_region
 
@@ -701,17 +734,19 @@ def resolve_silicon_slice_regions(
     resolved_p = resolve_same_polarity_regions(rank_regions["p"])
     n_total = union_regions(list(resolved_n.values()))
     p_total = union_regions(list(resolved_p.values()))
-    conflict = (n_total & p_total).merged()
+    conflict = merge_region(n_total & p_total)
 
     pn_policy = conflict_policy.get("pn_overlap", "debug_layer")
     if pn_policy == "error" and not conflict.is_empty():
         raise ValueError(f"PN doping overlap in {body}.{slice_name}")
     if pn_policy == "debug_layer":
         resolved_n = {
-            rank: (region - conflict).merged() for rank, region in resolved_n.items()
+            rank: merge_region(region - conflict)
+            for rank, region in resolved_n.items()
         }
         resolved_p = {
-            rank: (region - conflict).merged() for rank, region in resolved_p.items()
+            rank: merge_region(region - conflict)
+            for rank, region in resolved_p.items()
         }
         conflict_region = conflict
     elif pn_policy == "ignore":
@@ -727,8 +762,8 @@ def resolve_silicon_slice_regions(
     for rank, region in resolved_p.items():
         doped_regions[("p", rank)] = region
 
-    all_doped = (n_total | p_total).merged()
-    intrinsic = (body_region - all_doped).merged()
+    all_doped = merge_region(n_total | p_total)
+    intrinsic = merge_region(body_region - all_doped)
 
     return {
         "intrinsic": intrinsic,
@@ -912,11 +947,11 @@ def preprocess_aim_gds(
     )
     region_symbols = input_regions | derived_regions
     etch_region = evaluate_region_expression(etch_expression, region_symbols)
-    substrate_etchable_region = (substrate_region - etch_region).merged()
+    substrate_etchable_region = merge_region(substrate_region - etch_region)
     cladding_exclusion_region = evaluate_region_expression(
         cladding_exclusion_expression, region_symbols
     )
-    cladding_region = (substrate_region - cladding_exclusion_region).merged()
+    cladding_region = merge_region(substrate_region - cladding_exclusion_region)
     cladding_cutter_region = evaluate_region_expression(
         cladding_cutter_expression, region_symbols
     )
