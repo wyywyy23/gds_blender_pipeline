@@ -1,279 +1,55 @@
 # Advanced Usage
 
-This guide covers the AIM-specific implementation currently supported by GDS
-Blender Pipeline: metadata generation, preprocessing, scene controls, preset
-rendering, and render-farm/HPC export. Start with the
-[README](../README.md) to install the dependencies and render a first PNG.
+See the [README](../README.md) for installation and the first-render workflow.
 
-The pipeline creates visualization geometry rather than a fabrication GDS. It
-resolves AIM layers and silicon doping, writes explicit render layers with z
-heights, imports them through BlenderGDS, and applies AIM-specific materials and
-post-processing.
+## Make Targets
 
-All commands below are run from the repository root. Private foundry data, raw
-layouts, generated GDS files, renders, and `.blend` files are ignored by Git.
+| Target | Purpose |
+| --- | --- |
+| `aim-build GDS=...` | Build a scene under `.local/runs/<layout>/` |
+| `aim-render GDS=... PRESET=...` | Render a scene previously created by `aim-build` |
+| `aim-run GDS=... PRESET=...` | Rebuild and render with an existing preset |
+| `aim-preprocess AIM_GDS=... AIM_VISUAL_GDS=...` | Create a visualization GDS at explicit paths |
+| `aim-build-scene AIM_GDS=... AIM_VISUAL_GDS=... AIM_BLEND=...` | Preprocess and build at explicit paths |
+| `aim-render-layers` | Generate and merge render-layer metadata |
+| `aim-registry` | Generate the resolved layer registry |
+| `aim-blendergds-config` | Generate the BlenderGDS stack |
+| `aim-render-preset` | Render an explicit `.blend` with an explicit preset |
+| `aim-prepare-render-blend` | Create a portable render-ready `.blend` |
+| `aim-clean-generated` | Remove generated AIM metadata and stack files |
 
-## Rebuild And Render With An Existing Preset
+## Explicit Paths
 
-After using the README workflow to choose a camera and create a preset, this
-convenience target rebuilds a small layout with realistic materials and renders
-every run in that preset:
-
-```sh
-make aim-run GDS=path/to/input.gds PRESET=path/to/preset.yaml
-```
-
-This one command preprocesses the GDS, builds a realistic-color scene with the
-default baked Manifold cladding Boolean, and renders every run in the preset.
-Outputs are kept together under `.local/runs/<gds-name>/`:
-
-```text
-visual/<gds-name>.visual.gds
-blender/<gds-name>.realistic.blend
-renders/*.png
-```
-
-Use the staged workflows below when you do not want to rebuild the scene or
-when nondefault geometry and material controls are needed.
-
-## Workflows At A Glance
-
-```text
-private AIM config + raw GDS
-              |
-              v
-     generated layer metadata
-              |
-              v
-       visual/render GDS
-              |
-              v
-       editable Blender scene
-          /              \
-         v                v
- local preset renders   render-ready .blend
-                         for farm/HPC
-```
-
-| Goal | Make target | Main input | Main output |
-| --- | --- | --- | --- |
-| Build the onboarding scene | `make aim-build GDS=...` | One raw GDS | Visual GDS and realistic `.blend` under `.local/runs/` |
-| Render the onboarding scene | `make aim-render GDS=... PRESET=...` | Previously built scene and a preset | Preset renders under `.local/runs/` |
-| Rebuild and render | `make aim-run GDS=... PRESET=...` | One raw GDS and an existing render preset | Visual GDS, realistic `.blend`, and preset renders under `.local/runs/` |
-| [Set up Python dependencies](#requirements-and-setup) | `make env` | `environment.yml` | Conda environment `gds-blender-pipeline` |
-| [Generate AIM layer metadata](#workflow-1-generate-aim-metadata) | `make aim-registry aim-blendergds-config` | Private AIM YAML and PDK tech file | Generated YAML under `configs/aim/` and `configs/blender/aim.yaml` |
-| [Preprocess one GDS](#workflow-2-preprocess-raw-gds) | `make aim-preprocess-example` | `examples/<case>/raw/<file>.gds` | `examples/<case>/visual/<file>.visual.gds` |
-| [Preprocess every GDS in a case](#workflow-2-preprocess-raw-gds) | `make aim-preprocess-all-examples` | `examples/<case>/raw/*.gds` | Matching files under `examples/<case>/visual/` |
-| [Build editable Blender scenes](#workflow-3-build-an-editable-blender-scene) | `make aim-blender-scene-example` | One visual GDS, stack config, color YAML | One `.blend` per color scheme under `examples/<case>/blender/` |
-| [Render an existing scene locally](#workflow-4-render-locally-from-a-preset) | `make aim-render-preset` | Existing `.blend` and render preset | Images in the preset output directory |
-| [Prepare a farm/HPC artifact](#workflow-5-prepare-a-render-farmhpc-blend) | `make aim-prepare-render-blend` | Existing `.blend`, preset, and one run | Portable `.blend` under `examples/<case>/render_ready/` |
-| [Remove generated local files](#cleaning-generated-files) | `make aim-clean-generated` | Generated files | Generated YAML plus visual GDS and Blender files for the active case removed |
-
-Use Make for the repository defaults and repeatable workflows. Use the direct
-shell commands in the sections below when working with arbitrary paths or when
-you need script-specific options.
-
-## Folder And File Layout
-
-The recommended case layout is:
-
-```text
-gds_blender_pipeline/
-├── external_pdks/
-│   └── AIMPhotonics_ACT1/tech.py       # private input
-├── configs/
-│   ├── aim/
-│   │   ├── raw_custom_layers.yaml      # private input
-│   │   ├── doping_rules.yaml           # private input
-│   │   ├── render_layers.static.yaml   # private input
-│   │   ├── render_layers.yaml          # generated
-│   │   └── layer_registry.local.yaml   # generated
-│   └── blender/
-│       ├── aim.yaml                     # generated BlenderGDS stack
-│       ├── colors/aim/*.yaml            # tracked material presets
-│       └── render_presets/*.yaml        # tracked camera/render presets
-├── examples/
-│   ├── aim/                             # default AIM workflow case
-│   │   ├── raw/*.gds                    # AIM input layouts
-│   │   ├── visual/*.visual.gds          # generated visualization GDS
-│   │   ├── blender/
-│   │   │   ├── *.blend                  # editable scenes built from GDS
-│   │   │   └── renders/                 # local preset renders
-│   │   └── render_ready/
-│   │       ├── *.blend                  # prepared farm/HPC artifacts
-│   │       └── renders/                 # prepared-file render output
-│   ├── sky130/                          # SKY130 example layouts
-│   └── <case>/                          # optional additional cases
-└── scripts/                             # pipeline commands
-```
-
-`examples/aim/` is the default for the AIM Make targets. The current SKY130
-layout is `examples/sky130/wrapped_vga_clock.gds`; it is kept as a separate
-example and is not processed by the AIM-specific layer rules.
-
-The important input/output convention is:
-
-| Directory | Role | Created by pipeline? | Tracked by Git? |
-| --- | --- | --- | --- |
-| `external_pdks/` | Private PDK source | No | No |
-| `configs/aim/` | Private process rules plus generated AIM metadata | Partly | No |
-| `configs/blender/colors/aim/` | Material/color schemes | No | Yes |
-| `configs/blender/render_presets/` | Camera, Cycles, output, and visibility presets | No | Yes |
-| `examples/<case>/raw/` | Raw GDS input | No | No |
-| `examples/<case>/visual/` | Preprocessed render GDS | Yes | No |
-| `examples/<case>/blender/` | Editable Blender scenes built from visual GDS | Yes | No |
-| `examples/<case>/blender/renders/` | Images rendered directly from editable scenes | Yes | No |
-| `examples/<case>/render_ready/` | Prepared render-farm/HPC `.blend` files | Yes | No |
-| `examples/<case>/render_ready/renders/` | Images rendered from prepared files | Yes | No |
-
-## Requirements And Setup
-
-Install these separately:
-
-- Conda or Mamba.
-- `make`.
-- Blender.
-- [GDSII Importer](https://extensions.blender.org/add-ons/import-gdsii/),
-  referred to as BlenderGDS in this repository, installed and enabled in
-  Blender. The scene builder searches for the `bpy.ops.import_scene.gdsii`
-  operator and tries common add-on module names, but it cannot install the
-  extension.
-- The private AIM inputs listed in [Private AIM Configuration](#private-aim-configuration).
-
-Create or update the Python environment and verify it:
+### Preprocess
 
 ```sh
-make env
-make env-info
+AIM_GDS=path/to/my_cell.gds \
+AIM_VISUAL_GDS=.local/work/my_cell.visual.gds \
+make aim-preprocess
 ```
 
-The Conda environment runs the GDS preprocessing scripts. Blender and
-BlenderGDS are managed separately. If Blender is not on `PATH`, provide it to
-any Make workflow with:
+### Build
 
 ```sh
-BLENDER=/path/to/blender make aim-blender-scene-example
+AIM_GDS=path/to/my_cell.gds \
+AIM_VISUAL_GDS=.local/work/my_cell.visual.gds \
+AIM_BLEND=.local/work/my_cell.blend \
+make aim-build-scene
 ```
 
-## Build The Default Example
+`AIM_BLEND` is a base path. The color scheme is inserted before `.blend`, so
+the default output above is `.local/work/my_cell.realistic.blend`.
 
-After installing the requirements and supplying the private AIM files:
+## AIM Metadata
 
-```sh
-make env
-make aim-blender-scene-example
-```
-
-That single scene command runs its prerequisites automatically:
-
-1. Generate and merge render-layer metadata.
-2. Build the local layer registry and BlenderGDS stack.
-3. Preprocess the default raw GDS.
-4. Build a `.blend` with the realistic color scheme.
-
-Default input:
-
-```text
-examples/aim/raw/tx_array_checkered.gds
-```
-
-Default outputs:
-
-```text
-examples/aim/visual/tx_array_checkered.visual.gds
-examples/aim/blender/tx_array_checkered.realistic.blend
-```
-
-Open one in Blender to adjust the scene and discover a camera/render preset:
-
-```sh
-blender examples/aim/blender/tx_array_checkered.realistic.blend
-```
-
-## Run The Pipeline On Your Own Layout
-
-Create a case directory and place the input GDS under `raw/`:
-
-```text
-examples/my_case/raw/my_cell.gds
-```
-
-### Complete Workflow With Make
-
-For one layout and one color scheme:
-
-```sh
-EXAMPLE_DIR=examples/my_case \
-EXAMPLE_GDS=examples/my_case/raw/my_cell.gds \
-EXAMPLE_VISUAL_GDS=examples/my_case/visual/my_cell.visual.gds \
-EXAMPLE_BLEND=examples/my_case/blender/my_cell.blend \
-AIM_BLENDER_COLORS=configs/blender/colors/aim/realistic.yaml \
-make aim-blender-scene-example
-```
-
-Because the target inserts the color-scheme name before `.blend`, the final
-scene is:
-
-```text
-examples/my_case/blender/my_cell.realistic.blend
-```
-
-Set `AIM_BLENDER_COLORS` to a space-separated list of color YAML files to build
-more than one scheme in the same invocation.
-
-To preprocess every `.gds` in `examples/my_case/raw/`:
-
-```sh
-EXAMPLE_DIR=examples/my_case make aim-preprocess-all-examples
-```
-
-### Complete Workflow With Direct Commands
-
-Run the metadata workflow once after process-rule changes, then preprocess and
-build the layout:
-
-```sh
-conda run -n gds-blender-pipeline python scripts/aim_preprocess_gds.py \
-  --input examples/my_case/raw/my_cell.gds \
-  --registry configs/aim/layer_registry.local.yaml \
-  --output examples/my_case/visual/my_cell.visual.gds \
-  --max-polygon-vertices 256
-
-blender --background --python scripts/aim_build_blender_scene.py -- \
-  --gds examples/my_case/visual/my_cell.visual.gds \
-  --stack-config configs/blender/aim.yaml \
-  --color-config configs/blender/colors/aim/realistic.yaml \
-  --output examples/my_case/blender/my_cell.realistic.blend \
-  --z-scale 1 \
-  --camera-fit-margin 1.10 \
-  --cladding-mode boolean \
-  --no-merge-layers
-```
-
-Inputs:
-
-- Raw GDS: `examples/my_case/raw/my_cell.gds`.
-- Generated registry: `configs/aim/layer_registry.local.yaml`.
-- Generated BlenderGDS stack: `configs/blender/aim.yaml`.
-- Tracked color scheme: `configs/blender/colors/aim/realistic.yaml`.
-
-Outputs:
-
-- Visual GDS: `examples/my_case/visual/my_cell.visual.gds`.
-- Blender scene: `examples/my_case/blender/my_cell.realistic.blend`.
-
-## Workflow 1: Generate AIM Metadata
-
-Run this workflow whenever the PDK tech file, raw custom layers, doping rules,
-or static render layers change.
-
-### With Make
+Regenerate metadata after changing the PDK tech file, custom layers, doping
+rules, or static render layers:
 
 ```sh
 make aim-registry aim-blendergds-config
 ```
 
-These targets create:
+Generated files:
 
 ```text
 configs/aim/render_layers.doping.generated.yaml
@@ -282,15 +58,7 @@ configs/aim/layer_registry.local.yaml
 configs/blender/aim.yaml
 ```
 
-Individual targets are also available:
-
-```sh
-make aim-render-layers
-make aim-registry
-make aim-blendergds-config
-```
-
-### With Direct Commands
+Direct commands:
 
 ```sh
 conda run -n gds-blender-pipeline python scripts/aim_generate_doping_render_layers.py \
@@ -315,118 +83,47 @@ conda run -n gds-blender-pipeline python scripts/aim_generate_blendergds_config.
   --output configs/blender/aim.yaml
 ```
 
-## Workflow 2: Preprocess Raw GDS
+## Preprocessing
 
-Preprocessing flattens the input GDS, generates substrate and cladding regions,
-resolves silicon doping into explicit render layers, writes PN-conflict debug
-layers, and copies static expression layers such as waveguides, contacts, vias,
-metals, black-box proxies, and the PAAM passivation-opening cutter.
-
-### With Make
-
-Default example:
-
-```sh
-make aim-preprocess-example
-```
-
-Custom case:
-
-```sh
-EXAMPLE_GDS=examples/my_case/raw/my_cell.gds \
-EXAMPLE_VISUAL_GDS=examples/my_case/visual/my_cell.visual.gds \
-make aim-preprocess-example
-```
-
-The Make target also regenerates metadata when required.
-
-### With A Direct Command
+Preprocessing flattens the layout, generates substrate and cladding regions,
+resolves silicon doping, and writes explicit render layers.
 
 ```sh
 conda run -n gds-blender-pipeline python scripts/aim_preprocess_gds.py \
-  --input examples/my_case/raw/my_cell.gds \
+  --input path/to/my_cell.gds \
   --registry configs/aim/layer_registry.local.yaml \
-  --output examples/my_case/visual/my_cell.visual.gds
+  --output .local/work/my_cell.visual.gds \
+  --max-polygon-vertices 256
 ```
 
-## Workflow 3: Build An Editable Blender Scene
-
-### With Make
-
-```sh
-make aim-blender-scene-example
-```
-
-This builds one scene per selected color scheme. See
-[Make Variable Reference](#make-variable-reference) for path and geometry
-overrides.
-
-### With A Direct Command
+## Scene Building
 
 ```sh
 blender --background --python scripts/aim_build_blender_scene.py -- \
-  --gds examples/my_case/visual/my_cell.visual.gds \
+  --gds .local/work/my_cell.visual.gds \
   --stack-config configs/blender/aim.yaml \
   --color-config configs/blender/colors/aim/realistic.yaml \
-  --output examples/my_case/blender/my_cell.realistic.blend \
+  --output .local/work/my_cell.realistic.blend \
   --no-merge-layers
 ```
 
-The builder removes PN-conflict debug objects by default, applies materials,
-handles the cladding Boolean, fits the camera, and saves the scene. See
-[Scene-Building Controls](#scene-building-controls) for optional geometry and
-camera settings.
+The builder applies materials, handles cladding, fits the camera, removes
+PN-conflict debug objects, and saves the scene.
 
-## Workflow 4: Render Locally From A Preset
+## Render Presets
 
-A render preset stores the camera, lighting, color management, Cycles settings,
-output directory, and one or more named layer-visibility runs. Presets live
-under:
+A preset stores camera, lighting, color management, Cycles settings, output,
+and named layer-visibility runs. See the README for a minimal preset.
 
-```text
-configs/blender/render_presets/*.yaml
-```
-
-The included `trx_top_oblique_100mm.yaml` and
-`disk_array_oblique_100mm.yaml` presets render only `all_layers`. The
-`disk_array_oblique_300mm.yaml` preset renders a cumulative backend sequence:
-
-- `no_backend_or_cladding`
-- `through_cbam`
-- `through_m1am`
-- `through_v1am`
-- `through_m2am`
-- `through_vaam`
-- `through_mlam`
-- `all_layers`
-
-The two disk-array presets use `{example_name}` in `output.directory`. The
-renderer derives this value from the input `.blend` filename before its first
-dot, so `rx_array.realistic.boolean.blend` writes under
-`examples/aim/blender/renders/rx_array/`. An explicit `--output-dir` still
-overrides the preset directory.
-
-After adjusting a scene interactively in Blender, copy the camera location,
-rotation in degrees, and lens from the Camera properties into a new preset.
-For example, save this as `configs/blender/render_presets/my_view.yaml`:
+Useful optional fields:
 
 ```yaml
-version: 1
-name: my_view
-
-camera:
-  object: Camera
-  type: PERSP
-  location: [6050.0, 50.0, 10000.0]
-  rotation_degrees: [29.527, 0.0, 32.57]
-  lens_mm: 100.0
-
 lighting:
   sun:
     object: Sun
-    strength: 6.0
-    # Optional. When omitted, defaults to [camera_x, 0, -camera_z].
-    # rotation_degrees: [29.527, 0.0, -32.57]
+    strength: 5.0
+    # Optional; otherwise derived from the camera rotation.
+    rotation_degrees: [35.0, 0.0, 25.0]
 
 color_management:
   view_transform: AgX
@@ -439,9 +136,6 @@ render:
   adaptive_sampling: false
   file_format: PNG
 
-output:
-  directory: examples/my_case/blender/renders/my_view
-
 runs:
   - name: no_cladding
     hide_layers: [cladding]
@@ -449,325 +143,195 @@ runs:
     hide_layers: []
 ```
 
-Preset layer names accept short names such as `cladding` or `cbam`; the runner
-normalizes them to Blender render-layer object names. Presets currently support
-perspective cameras and Cycles. Render resolution remains the value saved in
-the source scene, and CPU/GPU device selection remains a machine-side setting.
-If `lighting.sun.rotation_degrees` is omitted, the Sun rotation is derived from
-the preset camera as `[camera_x, 0, -camera_z]`. An explicit three-angle Sun
-rotation overrides that default.
+Layer names accept short forms such as `cladding` or `cbam`. The renderer
+normalizes them to render-layer object names. Resolution is read from the
+source scene. CPU/GPU selection remains machine-specific.
 
-### With Make
-
-Render every run in the preset:
+### Render With Make
 
 ```sh
-make aim-render-preset
-```
-
-Choose the scene, selected runs, and output directory:
-
-```sh
-AIM_RENDER_BLEND=examples/my_case/blender/my_cell.realistic.blend \
+AIM_RENDER_BLEND=.local/runs/my_cell/blender/my_cell.realistic.blend \
 AIM_RENDER_PRESET=configs/blender/render_presets/my_view.yaml \
 AIM_RENDER_RUNS="no_cladding all_layers" \
-AIM_RENDER_OUTPUT_DIR=examples/my_case/blender/renders/my_view \
+AIM_RENDER_OUTPUT_DIR=.local/runs/my_cell/renders \
 make aim-render-preset
 ```
 
-If `AIM_RENDER_OUTPUT_DIR` is omitted, images go to the preset's
-`output.directory`. Output filenames have this form:
+Omit `AIM_RENDER_RUNS` to render every run.
 
-```text
-<blend>.<preset>.<run>.<image-extension>
-```
-
-### With A Direct Command
+### Render Directly
 
 ```sh
-blender --background examples/my_case/blender/my_cell.realistic.blend \
+blender --background .local/runs/my_cell/blender/my_cell.realistic.blend \
   --python scripts/aim_render_scene.py -- \
   --preset configs/blender/render_presets/my_view.yaml \
   --run no_cladding \
   --run all_layers \
-  --output-dir examples/my_case/blender/renders/my_view
+  --output-dir .local/runs/my_cell/renders
 ```
 
-Omit every `--run` flag to render all runs. Validate the preset, layer names,
-and paths without writing images with:
+Validate without rendering:
 
 ```sh
-blender --background examples/my_case/blender/my_cell.realistic.blend \
+blender --background .local/runs/my_cell/blender/my_cell.realistic.blend \
   --python scripts/aim_render_scene.py -- \
   --preset configs/blender/render_presets/my_view.yaml \
   --dry-run
 ```
 
-The renderer restores baseline object visibility between runs, so one run
-cannot leak visibility changes into the next.
+Output filenames use:
 
-## Workflow 5: Prepare A Render-Farm/HPC `.blend`
+```text
+<blend>.<preset>.<run>.<extension>
+```
 
-This workflow applies a preset without rendering locally. The exporter bakes
-one visibility state per output file, so select exactly one preset run and
-create one prepared `.blend` per farm job variant.
+The renderer restores baseline object visibility between runs.
 
-The prepared artifact contains:
+## Render-Farm/HPC `.blend`
 
-- Preset camera, lighting, color-management, and Cycles settings.
-- The selected run's `hide_render` state.
-- A portable render path under `//renders/` by default.
-- Packed external resources by default.
-- Scene metadata recording the source filename, preset, and run.
-
-No repository scripts are needed on the render node.
-
-### With Make
+This target applies one preset run without rendering. The output contains the
+preset camera, lighting, color management, render settings, visibility state,
+packed resources, and a portable render path.
 
 ```sh
-AIM_RENDER_BLEND=examples/my_case/blender/my_cell.realistic.blend \
+AIM_RENDER_BLEND=.local/runs/my_cell/blender/my_cell.realistic.blend \
 AIM_RENDER_PRESET=configs/blender/render_presets/my_view.yaml \
-AIM_RENDER_READY_RUN=no_cladding \
-AIM_RENDER_READY_BLEND=examples/my_case/render_ready/my_cell.no-cladding.render-ready.blend \
+AIM_RENDER_READY_RUN=all_layers \
+AIM_RENDER_READY_BLEND=.local/runs/my_cell/render_ready/my_cell.render-ready.blend \
 make aim-prepare-render-blend
 ```
 
-If `AIM_RENDER_READY_BLEND` is omitted and the source is under the case's
-`blender/` directory, the output is named:
-
-```text
-examples/<case>/render_ready/<source>.<preset>.<run>.blend
-```
-
-This keeps editable scenes imported from GDS separate from files prepared for
-deployment. For a source outside a directory named `blender`, the exporter
-creates `render_ready/` beside the source file.
-
-Set `AIM_RENDER_READY_OUTPUT` to change the render path stored inside the file.
-Set `AIM_RENDER_READY_PACK=0` if shared resources will be staged separately.
-
-### With A Direct Command
+Direct command:
 
 ```sh
-blender --background examples/my_case/blender/my_cell.realistic.blend \
+blender --background .local/runs/my_cell/blender/my_cell.realistic.blend \
   --python scripts/aim_prepare_render_blend.py -- \
   --preset configs/blender/render_presets/my_view.yaml \
-  --run no_cladding \
-  --output examples/my_case/render_ready/my_cell.no-cladding.render-ready.blend
+  --run all_layers \
+  --output .local/runs/my_cell/render_ready/my_cell.render-ready.blend
 ```
 
-Useful options:
+Options:
 
-- `--render-output //another/relative/path` changes the stored render path.
-- `--no-pack-resources` leaves external resources unpacked.
-- `--overwrite-source` explicitly allows replacing the source `.blend`.
+- `AIM_RENDER_READY_OUTPUT` or `--render-output`: stored render path.
+- `AIM_RENDER_READY_PACK=0` or `--no-pack-resources`: leave resources unpacked.
+- `--overwrite-source`: allow replacing the input `.blend`.
 
-After transferring the file, render a frame on the worker with:
+Render on a worker:
 
 ```sh
-blender --background my_cell.no-cladding.render-ready.blend --render-frame 1
+blender --background my_cell.render-ready.blend --render-frame 1
 ```
 
-Cycles CPU/GPU device selection remains a farm-side choice so the scheduler can
-use the appropriate arguments for each node type.
+## Scene Controls
 
-## Scene-Building Controls
+### Camera Fit
 
-### Camera Fitting
-
-The builder preserves GDS XY dimensions and automatically fits BlenderGDS's
-top-down camera to visible imported layers. Camera distance and clipping planes
-follow the chip bounding box; the Sun transform and chip geometry are not
-scaled.
-
-The default `--camera-fit-margin 1.10` gives a 10% camera-distance margin,
-approximately 4.5% image-space padding on each side of the limiting dimension.
-Use `--no-fit-camera` to retain BlenderGDS's fixed camera placement.
+The builder fits BlenderGDS's top-down camera to visible imported layers.
+`AIM_BLENDER_CAMERA_FIT_MARGIN=1.10` gives a 10% distance margin. Use
+`--no-fit-camera` with the direct builder command to retain BlenderGDS's camera.
 
 ### Vertical Exaggeration
 
-`--z-scale` changes layer elevations and thicknesses without changing XY:
+```sh
+AIM_BLENDER_Z_SCALE=20 make aim-build GDS=path/to/my_cell.gds
+```
+
+`1.0` preserves configured dimensions. Higher values scale layer elevation and
+thickness without changing XY dimensions.
+
+### Cladding Modes
+
+| Mode | Behavior |
+| --- | --- |
+| `boolean` | Import cladding and cutters, subtract openings, and bake the result; default |
+| `solid` | Import uncut cladding without cutters |
+| `omit` | Import neither cladding nor cutters |
 
 ```sh
-AIM_BLENDER_Z_SCALE=20 make aim-blender-scene-example
+AIM_BLENDER_CLADDING_MODE=solid make aim-build GDS=path/to/my_cell.gds
 ```
 
-`z-scale=1` preserves configured physical dimensions. Values above one are
-visualization aids and should be recorded with rendered output. The scale
-applies to every configured layer, including substrate and cladding depths.
-
-### Cladding
-
-Choose a cladding mode with `--cladding-mode` or
-`AIM_BLENDER_CLADDING_MODE`:
-
-```text
-boolean  Import cladding and both cutters, then add the opening Booleans (default).
-solid    Import solid, uncut cladding without importing either cutter.
-omit     Import neither cladding nor its cutters.
-```
-
-The cladding extends from `z = -2.001 um` through a `0.500 um` passivation cap
-above the MLAM top, ending at `z = 5.980 um`. Its `0.001 um` render-only overlap
-into the substrate avoids a coincident cladding/substrate boundary and the
-resulting line-shaped render artifacts. The full-height TUAM-derived undercut
-cutter opens the cladding down through the BOX. A separate cutter copied from
-raw PAAM opens only the passivation cap: it spans `z = 5.479` to `5.981 um`,
-providing a `0.001 um` Boolean overlap below the MLAM top and above the cladding
-surface. This avoids coincident cladding/MLAM top faces while exposing top metal
-only inside PAAM.
-
-For example:
-
-```sh
-AIM_BLENDER_CLADDING_MODE=solid make aim-blender-scene-example
-```
-
-The `solid` and `omit` modes filter the temporary BlenderGDS stack before
-extrusion, which avoids creating expensive meshes for large layouts. The older
-`--no-cladding-boolean` flag remains a deprecated alias for
-`--cladding-mode solid`.
-
-The 256-point preprocessing limit remains in effect. The TUAM and PAAM cladding
-cutters are graph-colored into non-touching batches, subtracted one at a time
-with Blender's low-memory Manifold solver, and baked into the cladding mesh.
-This is the default Boolean path and leaves no live dependency-graph Boolean
-evaluation in the saved `.blend`. The subtraction remains in Blender so GDS
-fracture boundaries do not become visible cladding edges.
-
-Use `--cladding-boolean-solver exact` only as a diagnostic fallback. Use
-`--keep-live-cladding-boolean` to preserve modifiers for inspection; both
-choices can require substantially more memory. The Make equivalents are:
+The default path fractures cutter polygons to 256 points, graph-colors them
+into non-touching batches, applies Blender's Manifold solver sequentially, and
+bakes the result. Use `exact` only as a diagnostic fallback:
 
 ```sh
 AIM_BLENDER_CLADDING_BOOLEAN_SOLVER=exact \
 AIM_BLENDER_APPLY_CLADDING_BOOLEAN=0 \
-make aim-blender-scene-example
+make aim-build GDS=path/to/my_cell.gds
 ```
 
-For layouts where sequential TUAM fragment batches leave visible shading
-artifacts, an opt-in logical-opening path reconstructs the merged TUAM regions
-before extrusion. It creates one watertight prism per complete opening, combines
-those independent prisms into one cutter, and applies one undercut Boolean. PAAM
-continues to use the bounded passivation-cap Boolean above. The default remains
-`fractured_batches`, so existing disk-array builds are unchanged.
+`AIM_BLENDER_APPLY_CLADDING_BOOLEAN=0` keeps live modifiers.
 
-Generate and use the validated sidecar like this:
+#### Unfractured Cutter
+
+Use this path when fragmented TUAM batches produce shading artifacts:
 
 ```sh
 conda run -n gds-blender-pipeline python \
   scripts/aim_generate_unfractured_cladding_cutter.py \
-  --gds examples/aim/visual/trx_top.visual.gds \
-  --output .local/hpc/input/trx_top.unfractured_cutter.npz
+  --gds .local/runs/my_cell/visual/my_cell.visual.gds \
+  --output .local/runs/my_cell/my_cell.unfractured-cutter.npz
 
-blender --background --python scripts/aim_build_blender_scene.py -- \
-  --gds examples/aim/visual/trx_top.visual.gds \
-  --stack-config configs/blender/aim.yaml \
-  --color-config configs/blender/colors/aim/realistic.yaml \
-  --output examples/aim/blender/trx_top.realistic.unfractured.blend \
-  --cladding-undercut-method unfractured_cutter \
-  --cladding-unfractured-cutter \
-    .local/hpc/input/trx_top.unfractured_cutter.npz \
-  --no-merge-layers
+AIM_BLENDER_CLADDING_UNDERCUT_METHOD=unfractured_cutter \
+AIM_BLENDER_CLADDING_UNFRACTURED_CUTTER=.local/runs/my_cell/my_cell.unfractured-cutter.npz \
+make aim-build GDS=path/to/my_cell.gds
 ```
 
-The sidecar records complete planar triangles and directed boundary loops and
-is rejected unless its topology was validated during generation. The Blender
-builder extrudes those boundaries through the cladding, bakes the Boolean, and
-snaps the resulting horizontal cladding planes while enforcing flat shading.
+The sidecar contains validated planar triangles and directed boundary loops.
 
-For layouts whose very large Boolean result produces invalid Blender n-gon
-tessellation, `tiled_explicit_mesh` avoids the Blender Boolean entirely. It
-constructs the final lower cladding, passivation floor, upper cladding, and
-vertical boundary walls as an explicitly triangulated watertight mesh. Planar
-domains are tessellated in bounded tiles; adjacent tiles share coplanar edges
-without adding internal walls. The generator verifies triangle area and global
-closed, consistently oriented edge topology before writing the sidecar. This
-path is opt-in; `fractured_batches` remains the default.
+#### Tiled Explicit Mesh
+
+Use this path when a large Boolean result produces invalid Blender n-gon
+tessellation:
 
 ```sh
 conda run -n gds-blender-pipeline python \
   scripts/aim_generate_tiled_cladding_mesh.py \
-  --gds examples/aim/visual/trx_top.visual.gds \
-  --output .local/hpc/input/trx_top.tiled_explicit_cladding.npz \
+  --gds .local/runs/my_cell/visual/my_cell.visual.gds \
+  --output .local/runs/my_cell/my_cell.tiled-cladding.npz \
   --tile-size-um 200
 
-blender --background --python scripts/aim_build_blender_scene.py -- \
-  --gds examples/aim/visual/trx_top.visual.gds \
-  --stack-config configs/blender/aim.yaml \
-  --color-config configs/blender/colors/aim/realistic.yaml \
-  --output examples/aim/blender/trx_top.realistic.tiled_explicit.blend \
-  --cladding-undercut-method tiled_explicit_mesh \
-  --cladding-explicit-mesh \
-    .local/hpc/input/trx_top.tiled_explicit_cladding.npz \
-  --no-merge-layers
+AIM_BLENDER_CLADDING_UNDERCUT_METHOD=tiled_explicit_mesh \
+AIM_BLENDER_CLADDING_EXPLICIT_MESH=.local/runs/my_cell/my_cell.tiled-cladding.npz \
+make aim-build GDS=path/to/my_cell.gds
 ```
 
-For large-coordinate layouts with nanometer-scale boundary segments, add
-`--cladding-explicit-chunk-size-um 400` to store the same triangles in spatial
-objects with chunk-local coordinates. This opt-in representation reduces
-Blender/Cycles float32 precision loss without changing world geometry, material,
-or shadow visibility. Chunk objects retain the layer's base name with Blender
-numeric suffixes, so render-preset layer visibility continues to treat them as
-one layer.
+For large coordinates with nanometer-scale boundary segments, set
+`AIM_BLENDER_CLADDING_EXPLICIT_CHUNK_SIZE_UM=400` to use chunk-local object
+coordinates.
 
-### Removing Large Layers
-
-Remove additional imported layers from the saved `.blend` with repeated or
-comma-separated `--delete-layers` values. Short AIM names such as `cbam` resolve
-to names such as `CBAM_RENDER`:
+### Remove Layers
 
 ```sh
-blender --background --python scripts/aim_build_blender_scene.py -- \
-  --gds examples/my_case/visual/my_cell.visual.gds \
-  --stack-config configs/blender/aim.yaml \
-  --color-config configs/blender/colors/aim/realistic.yaml \
-  --output examples/my_case/blender/my_cell.realistic.blend \
-  --delete-layers cbam,v1am,vaam
+AIM_BLENDER_DELETE_LAYERS="cbam v1am vaam" \
+make aim-build GDS=path/to/my_cell.gds
 ```
 
-The Make equivalent is:
-
-```sh
-AIM_BLENDER_DELETE_LAYERS="cbam v1am vaam" make aim-blender-scene-example
-```
+Short names are resolved to render-layer names such as `CBAM_RENDER`.
 
 ## Color Schemes
 
-Material schemes live under `configs/blender/colors/aim/`:
+| File | Style |
+| --- | --- |
+| `configs/blender/colors/aim/realistic.yaml` | Physically plausible materials; default |
+| `configs/blender/colors/aim/fancy.yaml` | High color and light contrast |
+| `configs/blender/colors/aim/marketing.yaml` | Graphite, champagne, and platinum |
 
-- `realistic.yaml`: muted, physically plausible materials.
-- `fancy.yaml`: high color and light contrast grouped by material role.
-- `marketing.yaml`: shiny graphite, champagne, and platinum styling.
-
-Build only one scheme with:
-
-```sh
-AIM_BLENDER_COLORS=configs/blender/colors/aim/fancy.yaml \
-make aim-blender-scene-example
-```
-
-Color YAML keys must match render-layer names in `configs/blender/aim.yaml`.
-After adding or renaming render layers, regenerate the stack and update the
-color files. Validate the mapping with:
+Build several schemes with the explicit target:
 
 ```sh
-conda run -n gds-blender-pipeline python -c '
-from pathlib import Path
-import yaml
-
-stack = yaml.safe_load(Path("configs/blender/aim.yaml").read_text())
-for path in sorted(Path("configs/blender/colors/aim").glob("*.yaml")):
-    layers = yaml.safe_load(path.read_text())["layers"]
-    missing = [key for key in stack if key not in layers]
-    extra = [key for key in layers if key not in stack]
-    print(path.name, "missing", missing, "extra", extra)
-'
+AIM_GDS=path/to/my_cell.gds \
+AIM_VISUAL_GDS=.local/work/my_cell.visual.gds \
+AIM_BLEND=.local/work/my_cell.blend \
+AIM_BLENDER_COLORS="configs/blender/colors/aim/realistic.yaml configs/blender/colors/aim/fancy.yaml" \
+make aim-build-scene
 ```
 
-## Make Variable Reference
+Color keys must match layer names in `configs/blender/aim.yaml`.
 
-All variables can be overridden on the command line as shown in the examples.
+## Make Variables
 
 ### Tools And AIM Configuration
 
@@ -776,67 +340,71 @@ All variables can be overridden on the command line as shown in the examples.
 | `BLENDER` | `blender` | Blender executable |
 | `AIM_TECH` | `external_pdks/AIMPhotonics_ACT1/tech.py` | Private AIM tech file |
 | `AIM_RAW_CUSTOM` | `configs/aim/raw_custom_layers.yaml` | Custom raw-layer map |
-| `AIM_DOPING_RULES` | `configs/aim/doping_rules.yaml` | Silicon doping rules |
+| `AIM_DOPING_RULES` | `configs/aim/doping_rules.yaml` | Doping rules |
 | `AIM_RENDER_STATIC` | `configs/aim/render_layers.static.yaml` | Static render layers |
 | `AIM_LAYER_REGISTRY` | `configs/aim/layer_registry.local.yaml` | Generated registry |
 | `AIM_BLENDERGDS_CONFIG` | `configs/blender/aim.yaml` | Generated BlenderGDS stack |
 
-### Example And Scene Paths
+### Staged Workflow
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `EXAMPLE_DIR` | `examples/aim` | Active case directory |
-| `EXAMPLE_GDS` | `<EXAMPLE_DIR>/raw/tx_array_checkered.gds` | Raw GDS input |
-| `EXAMPLE_VISUAL_GDS` | `<EXAMPLE_DIR>/visual/tx_array_checkered.visual.gds` | Visual GDS output |
-| `EXAMPLE_BLEND` | `<EXAMPLE_DIR>/blender/tx_array_checkered.blend` | Base scene output; color name is inserted |
-| `EXAMPLE_RENDER_READY_DIR` | `<EXAMPLE_DIR>/render_ready` | Prepared farm/HPC artifacts |
-| `AIM_BLENDER_COLORS` | `configs/blender/colors/aim/realistic.yaml` | One or more color schemes to build |
-| `AIM_BLENDER_Z_SCALE` | `1.0` | Vertical scale only |
-| `AIM_BLENDER_CAMERA_FIT_MARGIN` | `1.10` | Automatic camera-fit margin |
+| `GDS` | empty | Raw GDS for `aim-build`, `aim-render`, and `aim-run` |
+| `PRESET` | empty | Preset for `aim-render` and `aim-run` |
+| `SCHEME` | `realistic` | Color scheme for the staged workflow |
+| `AIM_RUN_ROOT` | `.local/runs` | Staged output root |
+
+### Explicit Paths And Scene Controls
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `AIM_GDS` | empty | Raw GDS input |
+| `AIM_VISUAL_GDS` | empty | Visualization GDS output |
+| `AIM_BLEND` | empty | Base scene output; color name is inserted |
+| `AIM_BLENDER_COLORS` | `configs/blender/colors/aim/realistic.yaml` | One or more color files |
+| `AIM_PREPROCESS_MAX_POLYGON_VERTICES` | `256` | Polygon fracture limit |
+| `AIM_BLENDER_Z_SCALE` | `1.0` | Vertical scale |
+| `AIM_BLENDER_CAMERA_FIT_MARGIN` | `1.10` | Camera-fit margin |
 | `AIM_BLENDER_CLADDING_MODE` | `boolean` | `boolean`, `solid`, or `omit` |
-| `AIM_BLENDER_CLADDING_BOOLEAN_SOLVER` | `manifold` | `manifold` low-memory default or `exact` diagnostic fallback |
-| `AIM_BLENDER_CLADDING_UNDERCUT_METHOD` | `fractured_batches` | Default fragmented Boolean, `unfractured_cutter`, or opt-in `tiled_explicit_mesh` |
-| `AIM_BLENDER_CLADDING_UNFRACTURED_CUTTER` | empty | Logical-opening sidecar for `unfractured_cutter` |
-| `AIM_BLENDER_CLADDING_EXPLICIT_MESH` | empty | Validated final cladding sidecar for `tiled_explicit_mesh` |
-| `AIM_BLENDER_CLADDING_EXPLICIT_CHUNK_SIZE_UM` | `0` | Optional local-coordinate chunk size for the explicit mesh; `0` keeps one object |
-| `AIM_BLENDER_APPLY_CLADDING_BOOLEAN` | `1` | Bake Boolean batches sequentially; set to `0` to keep live modifiers |
+| `AIM_BLENDER_CLADDING_BOOLEAN_SOLVER` | `manifold` | `manifold` or `exact` |
+| `AIM_BLENDER_CLADDING_UNDERCUT_METHOD` | `fractured_batches` | Undercut construction method |
+| `AIM_BLENDER_CLADDING_UNFRACTURED_CUTTER` | empty | Logical-opening sidecar |
+| `AIM_BLENDER_CLADDING_EXPLICIT_MESH` | empty | Explicit cladding sidecar |
+| `AIM_BLENDER_CLADDING_EXPLICIT_CHUNK_SIZE_UM` | `0` | Explicit-mesh chunk size |
+| `AIM_BLENDER_APPLY_CLADDING_BOOLEAN` | `1` | Bake Boolean modifiers |
 | `AIM_BLENDER_DELETE_LAYERS` | empty | Imported layers to remove |
+| `AIM_BLENDER_MERGE_LAYERS` | `0` | Merge BlenderGDS layer fragments |
 
-### Render And Farm Output
+### Rendering
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `GDS` | empty | Raw GDS used by `aim-build`, `aim-render`, and `aim-run` |
-| `PRESET` | empty | Render preset used by `aim-render` and `aim-run` |
-| `SCHEME` | `realistic` | Color scheme used by the staged onboarding workflow |
-| `AIM_RUN_ROOT` | `.local/runs` | Root for the staged onboarding workflow |
-| `AIM_RENDER_BLEND` | Example `trx_top.realistic.blend` | Existing source scene |
-| `AIM_RENDER_PRESET` | `configs/blender/render_presets/trx_top_oblique_100mm.yaml` | Render preset |
-| `AIM_RENDER_RUNS` | empty/all runs | Runs selected for local rendering |
-| `AIM_RENDER_OUTPUT_DIR` | preset directory | Override local render directory |
-| `AIM_RENDER_READY_RUN` | `all_layers` | One run baked into a prepared `.blend` |
-| `AIM_RENDER_READY_BLEND` | `<case>/render_ready/<generated-name>.blend` | Prepared `.blend` output path |
-| `AIM_RENDER_READY_OUTPUT` | `//renders/<prepared-name>` | Render path stored in prepared file |
-| `AIM_RENDER_READY_PACK` | `1` | Pack external resources; use `0` to disable |
+| `AIM_RENDER_BLEND` | empty | Source scene |
+| `AIM_RENDER_PRESET` | empty | Render preset |
+| `AIM_RENDER_RUNS` | all runs | Selected preset runs |
+| `AIM_RENDER_OUTPUT_DIR` | preset directory | Output override |
+| `AIM_RENDER_READY_RUN` | `all_layers` | Run baked into a portable scene |
+| `AIM_RENDER_READY_BLEND` | generated beside source | Portable scene output |
+| `AIM_RENDER_READY_OUTPUT` | `//renders/<name>` | Stored render path |
+| `AIM_RENDER_READY_PACK` | `1` | Pack external resources |
 
 ## Private AIM Configuration
 
-These files must be supplied locally and must not be committed:
+These files are local and ignored by Git:
 
-| Path | Required | Generated | Purpose |
-| --- | --- | --- | --- |
-| `external_pdks/AIMPhotonics_ACT1/tech.py` | Yes | No | AIM PDK tech file containing `LayerMapAIM` |
-| `configs/aim/raw_custom_layers.yaml` | Yes | No | Custom raw markers absent from the tech file |
-| `configs/aim/doping_rules.yaml` | Yes | No | Silicon bodies, slices, polarity, priority, and numbering |
-| `configs/aim/render_layers.static.yaml` | Yes | No | Substrate, cladding, waveguides, contacts, vias, and metals |
-| `configs/aim/render_layers.doping.generated.yaml` | No | Yes | Doping-derived render layers |
-| `configs/aim/render_layers.yaml` | No | Yes | Merged doping and static layers |
-| `configs/aim/layer_registry.local.yaml` | No | Yes | Resolved input/output layer registry |
-| `configs/blender/aim.yaml` | No | Yes | BlenderGDS z-stack config |
+| Path | Generated | Purpose |
+| --- | --- | --- |
+| `external_pdks/AIMPhotonics_ACT1/tech.py` | No | AIM tech file with `LayerMapAIM` |
+| `configs/aim/raw_custom_layers.yaml` | No | Custom raw markers |
+| `configs/aim/doping_rules.yaml` | No | Silicon and doping rules |
+| `configs/aim/render_layers.static.yaml` | No | Static render layers |
+| `configs/aim/render_layers.doping.generated.yaml` | Yes | Doping-derived render layers |
+| `configs/aim/render_layers.yaml` | Yes | Merged render layers |
+| `configs/aim/layer_registry.local.yaml` | Yes | Resolved registry |
+| `configs/blender/aim.yaml` | Yes | BlenderGDS stack |
 
-The registry builder parses the tech file with Python AST and does not import
-the PDK. Internal/private copies remain the source of truth for AIM layer
-numbers and process assumptions.
+The registry builder parses the tech file with Python AST; it does not import
+the PDK.
 
 ### Minimal `raw_custom_layers.yaml`
 
@@ -896,69 +464,35 @@ render_layers:
   STATIC_RENDER_LAYER:
     layer: [2000, 0]
     source: static
-    role: example
-    material_class: example_material
+    role: custom
+    material_class: custom_material
     expression: "RAW_LAYER_NAME | DERIVED_NAME"
     zmin: 0.0
     thickness: 1.0
 ```
 
-## Cleaning Generated Files
+## Local Make Targets
+
+The tracked Makefile optionally includes `Makefile.local`, which is ignored by
+Git. Put personal layout paths and debug targets there.
+
+## Cleaning
 
 ```sh
 make aim-clean-generated
 ```
 
-This removes generated AIM YAML, `configs/blender/aim.yaml`, visual GDS files
-for the active example, editable `.blend` files in its Blender directory, and
-prepared `.blend` files in its `render_ready` directory. It does not remove
-private PDK files, hand-maintained AIM configuration, or renders in nested
-directories.
-
-## Git Hygiene
-
-Before committing, inspect tracked, untracked, and ignored files:
-
-```sh
-git status --short
-git status --ignored --short
-git ls-files --others --exclude-standard
-```
-
-To find the rule that ignores a file:
-
-```sh
-git check-ignore -v path/to/file
-```
-
-Do not commit PDK tech files, private AIM layer maps, raw foundry GDS, generated
-visual GDS, or `.blend` output unless it has been deliberately sanitized and
-the ignore policy has been changed for that artifact.
-
-## Future Work
-
-- Add an opt-in render-preset missing-layer policy that warns and skips absent
-  objects while retaining strict validation by default, so reusable cumulative
-  presets do not hide misspelled layer names silently.
-- Resolve the large-GDS undercut cladding shadow artifact without changing the
-  default disk-array path: preserve one physical slab with openings, avoid
-  internal coplanar/vertical faces, and produce a memory-efficient,
-  render-stable triangulation at `trx_top` scale.
+This removes generated AIM YAML and `configs/blender/aim.yaml`. It does not
+remove scenes, renders, private PDK files, or hand-maintained configuration.
 
 ## Troubleshooting
 
-- `FileNotFoundError: external_pdks/.../tech.py`: place the private AIM tech
-  file at `AIM_TECH`, or override that variable with its actual path.
-- `Could not find class LayerMapAIM`: pass the correct `--class-name`, or check
-  the PDK tech path.
-- `BlenderGDS operator ... is not available`: install and enable BlenderGDS in
-  the Blender executable being used.
-- Missing render layer during preprocessing: verify that expressions in
-  `doping_rules.yaml` and `render_layers.static.yaml` reference names available
-  in the tech file or `raw_custom_layers.yaml`.
-- Empty expected output layers: check that the raw GDS contains the source
-  layers and that derived-region offsets are not too aggressive.
-- A preset run reports a missing layer: use a preset created for that scene, or
-  update the run's `hide_layers` list to match objects in the `.blend`.
-- Blender cannot find a farm asset: prepare again with resource packing enabled,
-  or stage the shared asset at the path expected by the `.blend`.
+| Error | Check |
+| --- | --- |
+| Missing tech file | `AIM_TECH` and the private PDK path |
+| Missing `LayerMapAIM` | Tech file and class name |
+| BlenderGDS operator unavailable | GDSII Importer installation in the selected Blender profile |
+| Missing render layer | Expressions in the tech file and local YAML |
+| Empty output layer | Raw layout layers and derived-region offsets |
+| Missing preset layer | Object names in the source `.blend` |
+| Missing farm asset | Resource packing or staged shared assets |

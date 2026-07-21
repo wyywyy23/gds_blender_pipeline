@@ -27,23 +27,16 @@ AIM_BLENDER_APPLY_CLADDING_BOOLEAN ?= 1
 AIM_PREPROCESS_MAX_POLYGON_VERTICES ?= 256
 AIM_BLENDER_MERGE_LAYERS ?= 0
 
-AIM_RENDER_BLEND ?= examples/aim/blender/trx_top.realistic.blend
-AIM_RENDER_PRESET ?= configs/blender/render_presets/trx_top_oblique_100mm.yaml
+AIM_GDS ?=
+AIM_VISUAL_GDS ?=
+AIM_BLEND ?=
+
 AIM_RENDER_RUNS ?=
 AIM_RENDER_OUTPUT_DIR ?=
 AIM_RENDER_READY_RUN ?= all_layers
 AIM_RENDER_READY_BLEND ?=
 AIM_RENDER_READY_OUTPUT ?=
 AIM_RENDER_READY_PACK ?= 1
-
-EXAMPLE_DIR ?= examples/aim
-EXAMPLE_RAW_DIR ?= $(EXAMPLE_DIR)/raw
-EXAMPLE_VISUAL_DIR ?= $(EXAMPLE_DIR)/visual
-EXAMPLE_BLENDER_DIR ?= $(EXAMPLE_DIR)/blender
-EXAMPLE_RENDER_READY_DIR ?= $(EXAMPLE_DIR)/render_ready
-EXAMPLE_GDS ?= $(EXAMPLE_RAW_DIR)/tx_array_checkered.gds
-EXAMPLE_VISUAL_GDS ?= $(EXAMPLE_VISUAL_DIR)/tx_array_checkered.visual.gds
-EXAMPLE_BLEND ?= $(EXAMPLE_BLENDER_DIR)/tx_array_checkered.blend
 
 # Minimal staged workflow. Build needs GDS; render additionally needs PRESET.
 GDS ?=
@@ -61,8 +54,7 @@ AIM_RUN_RENDER_DIR = $(AIM_RUN_DIR)/renders
 .PHONY: \
 	env env-update env-remove env-info \
 	aim-render-layers aim-registry aim-blendergds-config \
-	aim-preprocess-example aim-preprocess-all-examples \
-	aim-blender-scene-example aim-render-preset aim-prepare-render-blend \
+	aim-preprocess aim-build-scene aim-render-preset aim-prepare-render-blend \
 	aim-build aim-render aim-run aim-clean-generated
 
 aim-build:
@@ -70,24 +62,23 @@ aim-build:
 	@test -f "$(GDS)" || { echo "GDS file not found: $(GDS)"; exit 2; }
 	@test -f "$(AIM_RUN_SCHEME_CONFIG)" || { echo "Color scheme not found: $(AIM_RUN_SCHEME_CONFIG)"; exit 2; }
 	@echo "Building $(SCHEME)-color Blender scene from $(GDS)"
-	+$(MAKE) aim-blender-scene-example \
-		EXAMPLE_DIR="$(AIM_RUN_DIR)" \
-		EXAMPLE_GDS="$(GDS)" \
-		EXAMPLE_VISUAL_GDS="$(AIM_RUN_VISUAL_GDS)" \
-		EXAMPLE_BLEND="$(AIM_RUN_BASE_BLEND)" \
+	+$(MAKE) aim-build-scene \
+		AIM_GDS="$(GDS)" \
+		AIM_VISUAL_GDS="$(AIM_RUN_VISUAL_GDS)" \
+		AIM_BLEND="$(AIM_RUN_BASE_BLEND)" \
 		AIM_BLENDER_COLORS="$(AIM_RUN_SCHEME_CONFIG)" \
-		AIM_PREPROCESS_MAX_POLYGON_VERTICES=256 \
-		AIM_BLENDER_Z_SCALE=1.0 \
-		AIM_BLENDER_CAMERA_FIT_MARGIN=1.10 \
-		AIM_BLENDER_CLADDING_MODE=boolean \
-		AIM_BLENDER_CLADDING_BOOLEAN_SOLVER=manifold \
-		AIM_BLENDER_CLADDING_UNDERCUT_METHOD=fractured_batches \
-		AIM_BLENDER_CLADDING_UNFRACTURED_CUTTER= \
-		AIM_BLENDER_CLADDING_EXPLICIT_MESH= \
-		AIM_BLENDER_CLADDING_EXPLICIT_CHUNK_SIZE_UM=0 \
-		AIM_BLENDER_APPLY_CLADDING_BOOLEAN=1 \
-		AIM_BLENDER_DELETE_LAYERS= \
-		AIM_BLENDER_MERGE_LAYERS=0
+		AIM_PREPROCESS_MAX_POLYGON_VERTICES="$(AIM_PREPROCESS_MAX_POLYGON_VERTICES)" \
+		AIM_BLENDER_Z_SCALE="$(AIM_BLENDER_Z_SCALE)" \
+		AIM_BLENDER_CAMERA_FIT_MARGIN="$(AIM_BLENDER_CAMERA_FIT_MARGIN)" \
+		AIM_BLENDER_CLADDING_MODE="$(AIM_BLENDER_CLADDING_MODE)" \
+		AIM_BLENDER_CLADDING_BOOLEAN_SOLVER="$(AIM_BLENDER_CLADDING_BOOLEAN_SOLVER)" \
+		AIM_BLENDER_CLADDING_UNDERCUT_METHOD="$(AIM_BLENDER_CLADDING_UNDERCUT_METHOD)" \
+		AIM_BLENDER_CLADDING_UNFRACTURED_CUTTER="$(AIM_BLENDER_CLADDING_UNFRACTURED_CUTTER)" \
+		AIM_BLENDER_CLADDING_EXPLICIT_MESH="$(AIM_BLENDER_CLADDING_EXPLICIT_MESH)" \
+		AIM_BLENDER_CLADDING_EXPLICIT_CHUNK_SIZE_UM="$(AIM_BLENDER_CLADDING_EXPLICIT_CHUNK_SIZE_UM)" \
+		AIM_BLENDER_APPLY_CLADDING_BOOLEAN="$(AIM_BLENDER_APPLY_CLADDING_BOOLEAN)" \
+		AIM_BLENDER_DELETE_LAYERS="$(AIM_BLENDER_DELETE_LAYERS)" \
+		AIM_BLENDER_MERGE_LAYERS="$(AIM_BLENDER_MERGE_LAYERS)"
 	@echo "Scene: $(AIM_RUN_BLEND)"
 
 aim-render:
@@ -149,42 +140,40 @@ aim-blendergds-config: aim-render-layers
 		--render-layers $(AIM_RENDER_LAYERS) \
 		--output $(AIM_BLENDERGDS_CONFIG)
 
-aim-preprocess-example: aim-registry aim-blendergds-config
-	mkdir -p $(EXAMPLE_VISUAL_DIR)
+aim-preprocess:
+	@test -n "$(strip $(AIM_GDS))" || { echo "AIM_GDS is required"; exit 2; }
+	@test -n "$(strip $(AIM_VISUAL_GDS))" || { echo "AIM_VISUAL_GDS is required"; exit 2; }
+	@test -f "$(AIM_GDS)" || { echo "GDS file not found: $(AIM_GDS)"; exit 2; }
+	+$(MAKE) aim-registry aim-blendergds-config
+	mkdir -p "$(dir $(AIM_VISUAL_GDS))"
 	conda run -n $(ENV_NAME) python scripts/aim_preprocess_gds.py \
-		--input $(EXAMPLE_GDS) \
-		--registry $(AIM_LAYER_REGISTRY) \
-		--output $(EXAMPLE_VISUAL_GDS) \
-		--max-polygon-vertices $(AIM_PREPROCESS_MAX_POLYGON_VERTICES)
+		--input "$(AIM_GDS)" \
+		--registry "$(AIM_LAYER_REGISTRY)" \
+		--output "$(AIM_VISUAL_GDS)" \
+		--max-polygon-vertices "$(AIM_PREPROCESS_MAX_POLYGON_VERTICES)"
 
-aim-preprocess-all-examples: aim-registry aim-blendergds-config
-	mkdir -p $(EXAMPLE_VISUAL_DIR)
-	@for gds in $(EXAMPLE_RAW_DIR)/*.gds; do \
-		base=$$(basename $$gds .gds); \
-		out="$(EXAMPLE_VISUAL_DIR)/$${base}.visual.gds"; \
-		echo "Preprocessing $$gds -> $$out"; \
-		conda run -n $(ENV_NAME) python scripts/aim_preprocess_gds.py \
-			--input "$$gds" \
-			--registry $(AIM_LAYER_REGISTRY) \
-			--output "$$out" \
-			--max-polygon-vertices $(AIM_PREPROCESS_MAX_POLYGON_VERTICES); \
-	done
-
-aim-blender-scene-example: aim-preprocess-example
-	mkdir -p $(EXAMPLE_BLENDER_DIR)
+aim-build-scene:
+	@test -n "$(strip $(AIM_GDS))" || { echo "AIM_GDS is required"; exit 2; }
+	@test -n "$(strip $(AIM_VISUAL_GDS))" || { echo "AIM_VISUAL_GDS is required"; exit 2; }
+	@test -n "$(strip $(AIM_BLEND))" || { echo "AIM_BLEND is required"; exit 2; }
 	@if [ -z "$(AIM_BLENDER_COLORS)" ]; then \
 		echo "No AIM color schemes found in $(AIM_BLENDER_COLOR_DIR)"; \
 		exit 1; \
 	fi
-	@blend_dir=$$(dirname "$(EXAMPLE_BLEND)"); \
-	blend_stem=$$(basename "$(EXAMPLE_BLEND)" .blend); \
+	@for color_config in $(AIM_BLENDER_COLORS); do \
+		test -f "$$color_config" || { echo "Color scheme not found: $$color_config"; exit 2; }; \
+	done
+	+$(MAKE) aim-preprocess AIM_GDS="$(AIM_GDS)" AIM_VISUAL_GDS="$(AIM_VISUAL_GDS)"
+	mkdir -p "$(dir $(AIM_BLEND))"
+	@blend_dir=$$(dirname "$(AIM_BLEND)"); \
+	blend_stem=$$(basename "$(AIM_BLEND)" .blend); \
 	for color_config in $(AIM_BLENDER_COLORS); do \
 		scheme=$$(basename "$$color_config" .yaml); \
 		output="$${blend_dir}/$${blend_stem}.$${scheme}.blend"; \
 		echo "Building Blender scene with $$scheme colors -> $$output"; \
 		$(BLENDER) --background --python scripts/aim_build_blender_scene.py -- \
-			--gds $(EXAMPLE_VISUAL_GDS) \
-			--stack-config $(AIM_BLENDERGDS_CONFIG) \
+			--gds "$(AIM_VISUAL_GDS)" \
+			--stack-config "$(AIM_BLENDERGDS_CONFIG)" \
 			--color-config "$$color_config" \
 			--output "$$output" \
 			--z-scale $(AIM_BLENDER_Z_SCALE) \
@@ -201,16 +190,24 @@ aim-blender-scene-example: aim-preprocess-example
 	done
 
 aim-render-preset:
-	$(BLENDER) --background $(AIM_RENDER_BLEND) \
+	@test -n "$(strip $(AIM_RENDER_BLEND))" || { echo "AIM_RENDER_BLEND is required"; exit 2; }
+	@test -n "$(strip $(AIM_RENDER_PRESET))" || { echo "AIM_RENDER_PRESET is required"; exit 2; }
+	@test -f "$(AIM_RENDER_BLEND)" || { echo "Blend file not found: $(AIM_RENDER_BLEND)"; exit 2; }
+	@test -f "$(AIM_RENDER_PRESET)" || { echo "Preset file not found: $(AIM_RENDER_PRESET)"; exit 2; }
+	$(BLENDER) --background "$(AIM_RENDER_BLEND)" \
 		--python scripts/aim_render_scene.py -- \
-		--preset $(AIM_RENDER_PRESET) \
+		--preset "$(AIM_RENDER_PRESET)" \
 		$(foreach run,$(AIM_RENDER_RUNS),--run $(run)) \
 		$(if $(strip $(AIM_RENDER_OUTPUT_DIR)),--output-dir "$(AIM_RENDER_OUTPUT_DIR)")
 
 aim-prepare-render-blend:
-	$(BLENDER) --background $(AIM_RENDER_BLEND) \
+	@test -n "$(strip $(AIM_RENDER_BLEND))" || { echo "AIM_RENDER_BLEND is required"; exit 2; }
+	@test -n "$(strip $(AIM_RENDER_PRESET))" || { echo "AIM_RENDER_PRESET is required"; exit 2; }
+	@test -f "$(AIM_RENDER_BLEND)" || { echo "Blend file not found: $(AIM_RENDER_BLEND)"; exit 2; }
+	@test -f "$(AIM_RENDER_PRESET)" || { echo "Preset file not found: $(AIM_RENDER_PRESET)"; exit 2; }
+	$(BLENDER) --background "$(AIM_RENDER_BLEND)" \
 		--python scripts/aim_prepare_render_blend.py -- \
-		--preset $(AIM_RENDER_PRESET) \
+		--preset "$(AIM_RENDER_PRESET)" \
 		--run $(AIM_RENDER_READY_RUN) \
 		$(if $(strip $(AIM_RENDER_READY_BLEND)),--output "$(AIM_RENDER_READY_BLEND)") \
 		$(if $(strip $(AIM_RENDER_READY_OUTPUT)),--render-output "$(AIM_RENDER_READY_OUTPUT)") \
@@ -221,8 +218,5 @@ aim-clean-generated:
 	rm -f $(AIM_RENDER_LAYERS)
 	rm -f $(AIM_LAYER_REGISTRY)
 	rm -f $(AIM_BLENDERGDS_CONFIG)
-	rm -f $(EXAMPLE_VISUAL_DIR)/*.visual.gds
-	rm -f $(EXAMPLE_BLENDER_DIR)/*.blend
-	rm -f $(EXAMPLE_BLENDER_DIR)/*.blend1
-	rm -f $(EXAMPLE_RENDER_READY_DIR)/*.blend
-	rm -f $(EXAMPLE_RENDER_READY_DIR)/*.blend1
+
+-include Makefile.local

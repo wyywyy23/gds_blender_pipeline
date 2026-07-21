@@ -4,6 +4,9 @@ pdks/
 foundry/
 foundries/
 
+# Personal Make targets and paths
+/Makefile.local
+
 # AIM local layer metadata derived from private foundry data
 configs/aim/
 configs/**/*.local.yaml
@@ -16,9 +19,7 @@ configs/blender/aim.yaml
 *.oasis
 *.blend
 *.blend[0-9]*
-examples/**/raw/
-examples/**/visual/
-examples/**/blender/
+/examples/
 /.local/runs/
 
 # Python

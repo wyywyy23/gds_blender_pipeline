@@ -48,10 +48,9 @@ Run all commands from the repository root.
 make aim-build GDS=path/to/my_cell.gds
 ```
 
-Outputs:
+Scene:
 
 ```text
-.local/runs/my_cell/visual/my_cell.visual.gds
 .local/runs/my_cell/blender/my_cell.realistic.blend
 ```
 
@@ -64,8 +63,9 @@ applied automatically.
 blender .local/runs/my_cell/blender/my_cell.realistic.blend
 ```
 
-- Select `Camera` and enter camera view (`Numpad 0`).
-- Position the camera. **Lock Camera to View** may help.
+- Compose the desired view in the 3D Viewport.
+- Select `Camera`, then choose **View > Align View > Align Active Camera to
+  View** (`Ctrl` + `Alt` + `Numpad 0`).
 - Record its **Location**, **Rotation**, and **Focal Length**.
 
 ### 3. Create A Preset
@@ -133,7 +133,7 @@ Pass the same `SCHEME` to `aim-render` to render that scene.
 
 ```text
 .local/runs/<layout>/
-├── visual/              # visualization GDS
+├── visual/              # internal visualization GDS
 ├── blender/             # editable scenes
 └── renders/             # PNG renders
 ```
