@@ -25,6 +25,8 @@ AIM_BLENDER_CLADDING_EXPLICIT_MESH ?=
 AIM_BLENDER_CLADDING_EXPLICIT_CHUNK_SIZE_UM ?= 0
 AIM_BLENDER_APPLY_CLADDING_BOOLEAN ?= 1
 AIM_PREPROCESS_MAX_POLYGON_VERTICES ?= 256
+AIM_PREPROCESS_UNDERCUT ?= 1
+AIM_PREPROCESS_PASSIVATION_OPENING ?= 1
 AIM_BLENDER_MERGE_LAYERS ?= 0
 
 AIM_GDS ?=
@@ -42,13 +44,18 @@ AIM_RENDER_READY_PACK ?= 1
 GDS ?=
 PRESET ?=
 SCHEME ?= realistic
+UNDERCUT ?= 1
+PASSIVATION_OPENING ?= 1
 AIM_RUN_ROOT ?= .local/runs
 AIM_RUN_NAME = $(basename $(notdir $(GDS)))
 AIM_RUN_DIR = $(AIM_RUN_ROOT)/$(AIM_RUN_NAME)
-AIM_RUN_VISUAL_GDS = $(AIM_RUN_DIR)/visual/$(AIM_RUN_NAME).visual.gds
-AIM_RUN_BASE_BLEND = $(AIM_RUN_DIR)/blender/$(AIM_RUN_NAME).blend
+AIM_RUN_UNDERCUT_SUFFIX = $(if $(filter 0 false no,$(UNDERCUT)),.no-undercut)
+AIM_RUN_PASSIVATION_SUFFIX = $(if $(filter 0 false no,$(PASSIVATION_OPENING)),.no-passivation-opening)
+AIM_RUN_VARIANT_SUFFIX = $(AIM_RUN_UNDERCUT_SUFFIX)$(AIM_RUN_PASSIVATION_SUFFIX)
+AIM_RUN_VISUAL_GDS = $(AIM_RUN_DIR)/visual/$(AIM_RUN_NAME)$(AIM_RUN_VARIANT_SUFFIX).visual.gds
+AIM_RUN_BASE_BLEND = $(AIM_RUN_DIR)/blender/$(AIM_RUN_NAME)$(AIM_RUN_VARIANT_SUFFIX).blend
 AIM_RUN_SCHEME_CONFIG = $(AIM_BLENDER_COLOR_DIR)/$(SCHEME).yaml
-AIM_RUN_BLEND = $(AIM_RUN_DIR)/blender/$(AIM_RUN_NAME).$(SCHEME).blend
+AIM_RUN_BLEND = $(AIM_RUN_DIR)/blender/$(AIM_RUN_NAME)$(AIM_RUN_VARIANT_SUFFIX).$(SCHEME).blend
 AIM_RUN_RENDER_DIR = $(AIM_RUN_DIR)/renders
 
 .PHONY: \
@@ -61,6 +68,8 @@ aim-build:
 	@test -n "$(strip $(GDS))" || { echo "Usage: make aim-build GDS=path/to/input.gds"; exit 2; }
 	@test -f "$(GDS)" || { echo "GDS file not found: $(GDS)"; exit 2; }
 	@test -f "$(AIM_RUN_SCHEME_CONFIG)" || { echo "Color scheme not found: $(AIM_RUN_SCHEME_CONFIG)"; exit 2; }
+	@case "$(UNDERCUT)" in 1|true|yes|0|false|no) ;; *) echo "UNDERCUT must be 0 or 1"; exit 2;; esac
+	@case "$(PASSIVATION_OPENING)" in 1|true|yes|0|false|no) ;; *) echo "PASSIVATION_OPENING must be 0 or 1"; exit 2;; esac
 	@echo "Building $(SCHEME)-color Blender scene from $(GDS)"
 	+$(MAKE) aim-build-scene \
 		AIM_GDS="$(GDS)" \
@@ -68,6 +77,8 @@ aim-build:
 		AIM_BLEND="$(AIM_RUN_BASE_BLEND)" \
 		AIM_BLENDER_COLORS="$(AIM_RUN_SCHEME_CONFIG)" \
 		AIM_PREPROCESS_MAX_POLYGON_VERTICES="$(AIM_PREPROCESS_MAX_POLYGON_VERTICES)" \
+		AIM_PREPROCESS_UNDERCUT="$(UNDERCUT)" \
+		AIM_PREPROCESS_PASSIVATION_OPENING="$(PASSIVATION_OPENING)" \
 		AIM_BLENDER_Z_SCALE="$(AIM_BLENDER_Z_SCALE)" \
 		AIM_BLENDER_CAMERA_FIT_MARGIN="$(AIM_BLENDER_CAMERA_FIT_MARGIN)" \
 		AIM_BLENDER_CLADDING_MODE="$(AIM_BLENDER_CLADDING_MODE)" \
@@ -86,6 +97,8 @@ aim-render:
 	@test -n "$(strip $(PRESET))" || { echo "Usage: make aim-render GDS=path/to/input.gds PRESET=path/to/preset.yaml"; exit 2; }
 	@test -f "$(GDS)" || { echo "GDS file not found: $(GDS)"; exit 2; }
 	@test -f "$(PRESET)" || { echo "Preset file not found: $(PRESET)"; exit 2; }
+	@case "$(UNDERCUT)" in 1|true|yes|0|false|no) ;; *) echo "UNDERCUT must be 0 or 1"; exit 2;; esac
+	@case "$(PASSIVATION_OPENING)" in 1|true|yes|0|false|no) ;; *) echo "PASSIVATION_OPENING must be 0 or 1"; exit 2;; esac
 	@test -f "$(AIM_RUN_BLEND)" || { echo "Scene not found: $(AIM_RUN_BLEND). Run make aim-build first."; exit 2; }
 	@echo "Rendering $(AIM_RUN_BLEND) with $(PRESET)"
 	+$(MAKE) aim-render-preset \
@@ -100,8 +113,19 @@ aim-run:
 	@test -n "$(strip $(PRESET))" || { echo "Usage: make aim-run GDS=path/to/input.gds PRESET=path/to/preset.yaml"; exit 2; }
 	@test -f "$(GDS)" || { echo "GDS file not found: $(GDS)"; exit 2; }
 	@test -f "$(PRESET)" || { echo "Preset file not found: $(PRESET)"; exit 2; }
-	+$(MAKE) aim-build GDS="$(GDS)" SCHEME="$(SCHEME)"
-	+$(MAKE) aim-render GDS="$(GDS)" PRESET="$(PRESET)" SCHEME="$(SCHEME)"
+	@case "$(UNDERCUT)" in 1|true|yes|0|false|no) ;; *) echo "UNDERCUT must be 0 or 1"; exit 2;; esac
+	@case "$(PASSIVATION_OPENING)" in 1|true|yes|0|false|no) ;; *) echo "PASSIVATION_OPENING must be 0 or 1"; exit 2;; esac
+	+$(MAKE) aim-build \
+		GDS="$(GDS)" \
+		SCHEME="$(SCHEME)" \
+		UNDERCUT="$(UNDERCUT)" \
+		PASSIVATION_OPENING="$(PASSIVATION_OPENING)"
+	+$(MAKE) aim-render \
+		GDS="$(GDS)" \
+		PRESET="$(PRESET)" \
+		SCHEME="$(SCHEME)" \
+		UNDERCUT="$(UNDERCUT)" \
+		PASSIVATION_OPENING="$(PASSIVATION_OPENING)"
 
 env:
 	conda env create -f environment.yml || conda env update -f environment.yml --prune
@@ -144,13 +168,17 @@ aim-preprocess:
 	@test -n "$(strip $(AIM_GDS))" || { echo "AIM_GDS is required"; exit 2; }
 	@test -n "$(strip $(AIM_VISUAL_GDS))" || { echo "AIM_VISUAL_GDS is required"; exit 2; }
 	@test -f "$(AIM_GDS)" || { echo "GDS file not found: $(AIM_GDS)"; exit 2; }
+	@case "$(AIM_PREPROCESS_UNDERCUT)" in 1|true|yes|0|false|no) ;; *) echo "AIM_PREPROCESS_UNDERCUT must be 0 or 1"; exit 2;; esac
+	@case "$(AIM_PREPROCESS_PASSIVATION_OPENING)" in 1|true|yes|0|false|no) ;; *) echo "AIM_PREPROCESS_PASSIVATION_OPENING must be 0 or 1"; exit 2;; esac
 	+$(MAKE) aim-registry aim-blendergds-config
 	mkdir -p "$(dir $(AIM_VISUAL_GDS))"
 	conda run -n $(ENV_NAME) python scripts/aim_preprocess_gds.py \
 		--input "$(AIM_GDS)" \
 		--registry "$(AIM_LAYER_REGISTRY)" \
 		--output "$(AIM_VISUAL_GDS)" \
-		--max-polygon-vertices "$(AIM_PREPROCESS_MAX_POLYGON_VERTICES)"
+		--max-polygon-vertices "$(AIM_PREPROCESS_MAX_POLYGON_VERTICES)" \
+		$(if $(filter 0 false no,$(AIM_PREPROCESS_UNDERCUT)),--no-undercut) \
+		$(if $(filter 0 false no,$(AIM_PREPROCESS_PASSIVATION_OPENING)),--no-passivation-opening)
 
 aim-build-scene:
 	@test -n "$(strip $(AIM_GDS))" || { echo "AIM_GDS is required"; exit 2; }
@@ -163,7 +191,11 @@ aim-build-scene:
 	@for color_config in $(AIM_BLENDER_COLORS); do \
 		test -f "$$color_config" || { echo "Color scheme not found: $$color_config"; exit 2; }; \
 	done
-	+$(MAKE) aim-preprocess AIM_GDS="$(AIM_GDS)" AIM_VISUAL_GDS="$(AIM_VISUAL_GDS)"
+	+$(MAKE) aim-preprocess \
+		AIM_GDS="$(AIM_GDS)" \
+		AIM_VISUAL_GDS="$(AIM_VISUAL_GDS)" \
+		AIM_PREPROCESS_UNDERCUT="$(AIM_PREPROCESS_UNDERCUT)" \
+		AIM_PREPROCESS_PASSIVATION_OPENING="$(AIM_PREPROCESS_PASSIVATION_OPENING)"
 	mkdir -p "$(dir $(AIM_BLEND))"
 	@blend_dir=$$(dirname "$(AIM_BLEND)"); \
 	blend_stem=$$(basename "$(AIM_BLEND)" .blend); \

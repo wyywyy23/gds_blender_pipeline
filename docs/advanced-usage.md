@@ -28,6 +28,16 @@ AIM_VISUAL_GDS=.local/work/my_cell.visual.gds \
 make aim-preprocess
 ```
 
+Disable either process feature independently:
+
+```sh
+AIM_GDS=path/to/my_cell.gds \
+AIM_VISUAL_GDS=.local/work/my_cell.no-undercut.visual.gds \
+AIM_PREPROCESS_UNDERCUT=0 \
+AIM_PREPROCESS_PASSIVATION_OPENING=1 \
+make aim-preprocess
+```
+
 ### Build
 
 ```sh
@@ -95,6 +105,14 @@ conda run -n gds-blender-pipeline python scripts/aim_preprocess_gds.py \
   --output .local/work/my_cell.visual.gds \
   --max-polygon-vertices 256
 ```
+
+Direct flags:
+
+- `--no-undercut`: do not apply TUAM to the etchable substrate and do not
+  export the TUAM cladding cutter.
+- `--no-passivation-opening`: do not export the PAAM passivation cutter.
+
+DIAM processing remains enabled in all four TUAM/PAAM combinations.
 
 ## Scene Building
 
@@ -240,6 +258,28 @@ AIM_BLENDER_Z_SCALE=20 make aim-build GDS=path/to/my_cell.gds
 `1.0` preserves configured dimensions. Higher values scale layer elevation and
 thickness without changing XY dimensions.
 
+### TUAM Undercut And PAAM Opening
+
+`UNDERCUT` and `PASSIVATION_OPENING` are independent staged-workflow options:
+
+| `UNDERCUT` | `PASSIVATION_OPENING` | Output suffix |
+| --- | --- | --- |
+| `1` | `1` | none |
+| `1` | `0` | `.no-passivation-opening` |
+| `0` | `1` | `.no-undercut` |
+| `0` | `0` | `.no-undercut.no-passivation-opening` |
+
+```sh
+make aim-build \
+  GDS=path/to/my_cell.gds \
+  UNDERCUT=0 \
+  PASSIVATION_OPENING=1
+```
+
+Use the same values with `aim-render` so it selects the matching `.blend`.
+For explicit-path targets, use `AIM_PREPROCESS_UNDERCUT` and
+`AIM_PREPROCESS_PASSIVATION_OPENING`.
+
 ### Cladding Modes
 
 | Mode | Behavior |
@@ -352,6 +392,8 @@ Color keys must match layer names in `configs/blender/aim.yaml`.
 | `GDS` | empty | Raw GDS for `aim-build`, `aim-render`, and `aim-run` |
 | `PRESET` | empty | Preset for `aim-render` and `aim-run` |
 | `SCHEME` | `realistic` | Color scheme for the staged workflow |
+| `UNDERCUT` | `1` | Apply TUAM substrate etch and cladding opening |
+| `PASSIVATION_OPENING` | `1` | Apply the PAAM passivation opening |
 | `AIM_RUN_ROOT` | `.local/runs` | Staged output root |
 
 ### Explicit Paths And Scene Controls
@@ -363,6 +405,8 @@ Color keys must match layer names in `configs/blender/aim.yaml`.
 | `AIM_BLEND` | empty | Base scene output; color name is inserted |
 | `AIM_BLENDER_COLORS` | `configs/blender/colors/aim/realistic.yaml` | One or more color files |
 | `AIM_PREPROCESS_MAX_POLYGON_VERTICES` | `256` | Polygon fracture limit |
+| `AIM_PREPROCESS_UNDERCUT` | `1` | Apply TUAM substrate etch and export its cladding cutter |
+| `AIM_PREPROCESS_PASSIVATION_OPENING` | `1` | Export the PAAM passivation cutter |
 | `AIM_BLENDER_Z_SCALE` | `1.0` | Vertical scale |
 | `AIM_BLENDER_CAMERA_FIT_MARGIN` | `1.10` | Camera-fit margin |
 | `AIM_BLENDER_CLADDING_MODE` | `boolean` | `boolean`, `solid`, or `omit` |

@@ -8,6 +8,17 @@ which accepts configurable PDK layer stacks.
 
 Output is visualization geometry, not a fabrication GDS.
 
+## Layer Stack
+
+*Cumulative backend-layer progression using the realistic scheme and a 300 mm
+lens.*
+
+| No backend or cladding | + CBAM | + M1AM | + V1AM |
+| :---: | :---: | :---: | :---: |
+| ![No backend or cladding](docs/assets/readme/tx-array-checkered-stack-00-no-backend.png) | ![Through CBAM](docs/assets/readme/tx-array-checkered-stack-01-cbam.png) | ![Through M1AM](docs/assets/readme/tx-array-checkered-stack-02-m1am.png) | ![Through V1AM](docs/assets/readme/tx-array-checkered-stack-03-v1am.png) |
+| **+ M2AM** | **+ VAAM** | **+ MLAM** | **All layers** |
+| ![Through M2AM](docs/assets/readme/tx-array-checkered-stack-04-m2am.png) | ![Through VAAM](docs/assets/readme/tx-array-checkered-stack-05-vaam.png) | ![Through MLAM](docs/assets/readme/tx-array-checkered-stack-06-mlam.png) | ![All layers](docs/assets/readme/tx-array-checkered-stack-07-all-layers.png) |
+
 ## Dependencies
 
 - Conda or Mamba
@@ -115,13 +126,31 @@ Output:
 .local/runs/my_cell/renders/my_cell.realistic.my_view.all_layers.png
 ```
 
+## TUAM And PAAM Options
+
+| Final geometry | Build options | Scene |
+| --- | --- | --- |
+| TUAM undercut + PAAM opening | Default | `my_cell.realistic.blend` |
+| TUAM undercut only | `PASSIVATION_OPENING=0` | `my_cell.no-passivation-opening.realistic.blend` |
+| PAAM opening only | `UNDERCUT=0` | `my_cell.no-undercut.realistic.blend` |
+| Neither | `UNDERCUT=0 PASSIVATION_OPENING=0` | `my_cell.no-undercut.no-passivation-opening.realistic.blend` |
+
+```sh
+make aim-build GDS=path/to/my_cell.gds UNDERCUT=0 PASSIVATION_OPENING=0
+```
+
+`UNDERCUT=0` preserves the substrate and cladding at TUAM while retaining DIAM
+processing. `PASSIVATION_OPENING=0` preserves the passivation cap at PAAM. Pass
+the same options to `aim-render`.
+
 ## Color Schemes
 
-| Scheme | Style |
-| --- | --- |
-| `realistic` | Default, physically plausible materials |
-| `fancy` | Higher color and light contrast |
-| `marketing` | Graphite, champagne, and platinum styling |
+*All layers using a 100 mm lens.*
+
+| Realistic (default) | Fancy | Marketing |
+| :---: | :---: | :---: |
+| ![Realistic color scheme](docs/assets/readme/tx-array-checkered-color-realistic.png) | ![Fancy color scheme](docs/assets/readme/tx-array-checkered-color-fancy.png) | ![Marketing color scheme](docs/assets/readme/tx-array-checkered-color-marketing.png) |
+| Physically plausible materials | Higher color and light contrast | Graphite, champagne, and platinum |
 
 ```sh
 make aim-build GDS=path/to/my_cell.gds SCHEME=fancy

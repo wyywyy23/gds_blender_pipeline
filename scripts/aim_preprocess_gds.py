@@ -10,17 +10,17 @@ Current functionality:
   - Compute an extended bounding box.
   - Generate substrate render regions:
       SUBSTRATE_BASE_RENDER
-      SUBSTRATE_ETCHABLE_RENDER minus TUAM_EXPANDED / DIAM etch regions
+      SUBSTRATE_ETCHABLE_RENDER minus enabled TUAM_EXPANDED / DIAM etch regions
   - Generate cladding render regions:
       CLADDING_RENDER minus DIAM
-      CLADDING_UNDERCUT_CUTTER_RENDER
-      CLADDING_PASSIVATION_CUTTER_RENDER copied from PAAM
+      optional CLADDING_UNDERCUT_CUTTER_RENDER from TUAM
+      optional CLADDING_PASSIVATION_CUTTER_RENDER from PAAM
   - Generate silicon render regions from doping rules:
       intrinsic silicon
       doped silicon
       PN conflict debug
   - Copy remaining static expression layers:
-      passivation cutter, nitride, contact, vias, metals, PDK black box
+      nitride, contact, vias, metals, PDK black box
   - Write output visual/render GDS.
 """
 
@@ -884,6 +884,8 @@ def preprocess_aim_gds(
     *,
     bbox_margin_override: float | None = None,
     max_polygon_vertices: int | None = None,
+    include_undercut: bool = True,
+    include_passivation_opening: bool = True,
     show: bool = False,
 ) -> gf.Component:
     ensure_active_pdk()
@@ -914,17 +916,36 @@ def preprocess_aim_gds(
     ):
         raise ValueError("CLADDING_RENDER.preprocessing_exclusion_expression must be set")
 
-    cladding_cutter = render_layers["CLADDING_UNDERCUT_CUTTER_RENDER"]
-    cladding_cutter_layer = get_layer(
+    cladding_undercut_cutter = render_layers["CLADDING_UNDERCUT_CUTTER_RENDER"]
+    cladding_undercut_cutter_layer = get_layer(
         render_layers, "CLADDING_UNDERCUT_CUTTER_RENDER"
     )
-    cladding_cutter_expression = cladding_cutter.get("expression")
+    cladding_undercut_cutter_expression = cladding_undercut_cutter.get(
+        "expression"
+    )
     if (
-        not isinstance(cladding_cutter_expression, str)
-        or not cladding_cutter_expression.strip()
+        not isinstance(cladding_undercut_cutter_expression, str)
+        or not cladding_undercut_cutter_expression.strip()
     ):
         raise ValueError(
             "CLADDING_UNDERCUT_CUTTER_RENDER.expression must be set"
+        )
+
+    cladding_passivation_cutter = render_layers[
+        "CLADDING_PASSIVATION_CUTTER_RENDER"
+    ]
+    cladding_passivation_cutter_layer = get_layer(
+        render_layers, "CLADDING_PASSIVATION_CUTTER_RENDER"
+    )
+    cladding_passivation_cutter_expression = cladding_passivation_cutter.get(
+        "expression"
+    )
+    if (
+        not isinstance(cladding_passivation_cutter_expression, str)
+        or not cladding_passivation_cutter_expression.strip()
+    ):
+        raise ValueError(
+            "CLADDING_PASSIVATION_CUTTER_RENDER.expression must be set"
         )
 
     bbox_margin = (
@@ -940,20 +961,31 @@ def preprocess_aim_gds(
     substrate_region = bbox_region(size=size, center=center, dbu=dbu)
 
     input_regions = build_input_regions(c_flat, input_layers)
+    # Emptying the raw feature symbols disables every dependent expression while
+    # preserving unrelated processing such as DIAM and silicon doping.
+    processing_input_regions = dict(input_regions)
+    if not include_undercut:
+        processing_input_regions["TUAM"] = kdb.Region()
+    if not include_passivation_opening:
+        processing_input_regions["PAAM"] = kdb.Region()
+
     derived_regions = build_derived_regions(
-        input_regions=input_regions,
+        input_regions=processing_input_regions,
         derived_specs=derived_specs,
         dbu=dbu,
     )
-    region_symbols = input_regions | derived_regions
+    region_symbols = processing_input_regions | derived_regions
     etch_region = evaluate_region_expression(etch_expression, region_symbols)
     substrate_etchable_region = merge_region(substrate_region - etch_region)
     cladding_exclusion_region = evaluate_region_expression(
         cladding_exclusion_expression, region_symbols
     )
     cladding_region = merge_region(substrate_region - cladding_exclusion_region)
-    cladding_cutter_region = evaluate_region_expression(
-        cladding_cutter_expression, region_symbols
+    cladding_undercut_cutter_region = evaluate_region_expression(
+        cladding_undercut_cutter_expression, region_symbols
+    )
+    cladding_passivation_cutter_region = evaluate_region_expression(
+        cladding_passivation_cutter_expression, region_symbols
     )
 
     c_out = gf.Component(name=f"{Path(input_gds).stem}_VISUAL")
@@ -980,8 +1012,14 @@ def preprocess_aim_gds(
 
     add_region(
         c_out,
-        region=cladding_cutter_region,
-        layer=cladding_cutter_layer,
+        region=cladding_undercut_cutter_region,
+        layer=cladding_undercut_cutter_layer,
+    )
+
+    add_region(
+        c_out,
+        region=cladding_passivation_cutter_region,
+        layer=cladding_passivation_cutter_layer,
     )
 
     silicon_stats = add_silicon_regions(
@@ -1000,6 +1038,7 @@ def preprocess_aim_gds(
             "SUBSTRATE_ETCHABLE_RENDER",
             "CLADDING_RENDER",
             "CLADDING_UNDERCUT_CUTTER_RENDER",
+            "CLADDING_PASSIVATION_CUTTER_RENDER",
         },
     )
 
@@ -1022,6 +1061,11 @@ def preprocess_aim_gds(
         f"Input bbox: xmin={bbox[0]:.3f}, ymin={bbox[1]:.3f}, xmax={bbox[2]:.3f}, ymax={bbox[3]:.3f}"
     )
     print(f"BBox margin: {bbox_margin:.3f} um")
+    print(f"TUAM undercut: {'enabled' if include_undercut else 'disabled'}")
+    print(
+        "PAAM passivation opening: "
+        f"{'enabled' if include_passivation_opening else 'disabled'}"
+    )
     print(f"Render bbox size: {size[0]:.3f} x {size[1]:.3f} um")
     print(f"Render bbox center: ({center[0]:.3f}, {center[1]:.3f})")
     print(f"SUBSTRATE_BASE_RENDER layer: {substrate_base_layer}")
@@ -1033,14 +1077,29 @@ def preprocess_aim_gds(
         f"{count_region_polygons(substrate_etchable_region)}"
     )
     print(f"CLADDING_RENDER layer: {cladding_layer}")
-    print(f"CLADDING_UNDERCUT_CUTTER_RENDER layer: {cladding_cutter_layer}")
+    print(
+        "CLADDING_UNDERCUT_CUTTER_RENDER layer: "
+        f"{cladding_undercut_cutter_layer}"
+    )
+    print(
+        "CLADDING_PASSIVATION_CUTTER_RENDER layer: "
+        f"{cladding_passivation_cutter_layer}"
+    )
     print(f"Cladding exclusion expression: {cladding_exclusion_expression}")
     print(f"Cladding exclusion polygons: {count_region_polygons(cladding_exclusion_region)}")
-    print(f"Cladding cutter expression: {cladding_cutter_expression}")
+    print(f"Undercut cutter expression: {cladding_undercut_cutter_expression}")
+    print(
+        "Passivation cutter expression: "
+        f"{cladding_passivation_cutter_expression}"
+    )
     print(f"CLADDING_RENDER polygons: {count_region_polygons(cladding_region)}")
     print(
         "CLADDING_UNDERCUT_CUTTER_RENDER polygons: "
-        f"{count_region_polygons(cladding_cutter_region)}"
+        f"{count_region_polygons(cladding_undercut_cutter_region)}"
+    )
+    print(
+        "CLADDING_PASSIVATION_CUTTER_RENDER polygons: "
+        f"{count_region_polygons(cladding_passivation_cutter_region)}"
     )
     print(
         "Silicon non-empty outputs: "
@@ -1091,6 +1150,23 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--undercut",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Apply TUAM to the etchable substrate and export the TUAM cladding "
+            "cutter (default: enabled)"
+        ),
+    )
+    parser.add_argument(
+        "--passivation-opening",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Export the PAAM passivation-opening cutter (default: enabled)"
+        ),
+    )
+    parser.add_argument(
         "--show",
         action="store_true",
         help="Open output component in KLayout via gdsfactory",
@@ -1103,6 +1179,8 @@ def main() -> None:
         output_gds=args.output,
         bbox_margin_override=args.bbox_margin,
         max_polygon_vertices=args.max_polygon_vertices,
+        include_undercut=args.undercut,
+        include_passivation_opening=args.passivation_opening,
         show=args.show,
     )
 
