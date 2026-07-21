@@ -926,6 +926,16 @@ Do not commit PDK tech files, private AIM layer maps, raw foundry GDS, generated
 visual GDS, or `.blend` output unless it has been deliberately sanitized and
 the ignore policy has been changed for that artifact.
 
+## Future Work
+
+- Add an opt-in render-preset missing-layer policy that warns and skips absent
+  objects while retaining strict validation by default, so reusable cumulative
+  presets do not hide misspelled layer names silently.
+- Resolve the large-GDS undercut cladding shadow artifact without changing the
+  default disk-array path: preserve one physical slab with openings, avoid
+  internal coplanar/vertical faces, and produce a memory-efficient,
+  render-stable triangulation at `trx_top` scale.
+
 ## Troubleshooting
 
 - `FileNotFoundError: external_pdks/.../tech.py`: place the private AIM tech

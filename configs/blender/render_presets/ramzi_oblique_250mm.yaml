@@ -41,8 +41,6 @@ runs:
       - m1am
       - v1am
       - m2am
-      - vaam
-      - mlam
       - cladding
 
   - name: through_cbam
@@ -50,39 +48,21 @@ runs:
       - m1am
       - v1am
       - m2am
-      - vaam
-      - mlam
       - cladding
 
   - name: through_m1am
     hide_layers:
       - v1am
       - m2am
-      - vaam
-      - mlam
       - cladding
 
   - name: through_v1am
     hide_layers:
       - m2am
-      - vaam
-      - mlam
       - cladding
 
   - name: through_m2am
-    hide_layers:
-      - vaam
-      - mlam
-      - cladding
-
-  - name: through_vaam
-    hide_layers:
-      - mlam
-      - cladding
-
-  - name: through_mlam
-    hide_layers:
-      - cladding
+    hide_layers: [cladding]
 
   - name: all_layers
     hide_layers: []
