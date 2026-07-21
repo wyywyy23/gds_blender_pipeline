@@ -122,6 +122,20 @@ def load_preset(path: Path) -> dict[str, Any]:
             camera_data.get("lens_mm"), "camera.lens_mm"
         ),
     }
+    if "clip_start" in camera_data:
+        camera["clip_start"] = require_positive_number(
+            camera_data["clip_start"], "camera.clip_start"
+        )
+    if "clip_end" in camera_data:
+        camera["clip_end"] = require_positive_number(
+            camera_data["clip_end"], "camera.clip_end"
+        )
+    if (
+        "clip_start" in camera
+        and "clip_end" in camera
+        and camera["clip_end"] <= camera["clip_start"]
+    ):
+        raise ValueError("camera.clip_end must be greater than camera.clip_start")
     if not isinstance(camera["object"], str) or not camera["object"]:
         raise ValueError("camera.object must be a non-empty string")
     if camera["type"] != "PERSP":
@@ -354,11 +368,16 @@ def apply_camera(scene: Any, camera_config: dict[str, Any]) -> Any:
     )
     camera.data.type = camera_config["type"]
     camera.data.lens = camera_config["lens_mm"]
+    if "clip_start" in camera_config:
+        camera.data.clip_start = camera_config["clip_start"]
+    if "clip_end" in camera_config:
+        camera.data.clip_end = camera_config["clip_end"]
     print(
         "Camera preset: "
         f"object={camera.name}, location={tuple(camera.location)}, "
         f"rotation_degrees={camera_config['rotation_degrees']}, "
-        f"lens={camera.data.lens:g} mm"
+        f"lens={camera.data.lens:g} mm, "
+        f"clip=[{camera.data.clip_start:g}, {camera.data.clip_end:g}]"
     )
     return camera
 
