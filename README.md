@@ -10,14 +10,16 @@ Output is visualization geometry, not a fabrication GDS.
 
 ## Layer Stack
 
-*Cumulative backend-layer progression using the realistic scheme and a 300 mm
-lens.*
+*Cumulative coaxial-disk layer progression using the realistic scheme and a
+300 mm lens. The final frame enables the TUAM undercut and PAAM opening.*
 
-| No backend or cladding | + CBAM | + M1AM | + V1AM |
-| :---: | :---: | :---: | :---: |
-| ![No backend or cladding](docs/assets/readme/tx-array-checkered-stack-00-no-backend.png) | ![Through CBAM](docs/assets/readme/tx-array-checkered-stack-01-cbam.png) | ![Through M1AM](docs/assets/readme/tx-array-checkered-stack-02-m1am.png) | ![Through V1AM](docs/assets/readme/tx-array-checkered-stack-03-v1am.png) |
-| **+ M2AM** | **+ VAAM** | **+ MLAM** | **All layers** |
-| ![Through M2AM](docs/assets/readme/tx-array-checkered-stack-04-m2am.png) | ![Through VAAM](docs/assets/readme/tx-array-checkered-stack-05-vaam.png) | ![Through MLAM](docs/assets/readme/tx-array-checkered-stack-06-mlam.png) | ![All layers](docs/assets/readme/tx-array-checkered-stack-07-all-layers.png) |
+| No backend or cladding | + CBAM | + M1AM |
+| :---: | :---: | :---: |
+| ![No backend or cladding](docs/assets/readme/tx-array-coaxial-stack-00-no-backend.png) | ![Through CBAM](docs/assets/readme/tx-array-coaxial-stack-01-cbam.png) | ![Through M1AM](docs/assets/readme/tx-array-coaxial-stack-02-m1am.png) |
+| **+ V1AM** | **+ M2AM** | **+ VAAM** |
+| ![Through V1AM](docs/assets/readme/tx-array-coaxial-stack-03-v1am.png) | ![Through M2AM](docs/assets/readme/tx-array-coaxial-stack-04-m2am.png) | ![Through VAAM](docs/assets/readme/tx-array-coaxial-stack-05-vaam.png) |
+| **+ MLAM** | **+ Intact cladding** | **+ Undercut + PA opening** |
+| ![Through MLAM](docs/assets/readme/tx-array-coaxial-stack-06-mlam.png) | ![All layers with intact cladding](docs/assets/readme/tx-array-coaxial-stack-07-cladding.png) | ![All layers with undercut and PA opening](docs/assets/readme/tx-array-coaxial-stack-08-openings.png) |
 
 ## Dependencies
 
