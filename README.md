@@ -41,13 +41,13 @@ If Blender is not on `PATH`, add `BLENDER=/path/to/blender` to Make commands.
 
 ## Required Files
 
-| File | Description |
-| --- | --- |
+| File                                      | Description                                  |
+| ----------------------------------------- | -------------------------------------------- |
 | `external_pdks/AIMPhotonics_ACT1/tech.py` | AIM technology file containing `LayerMapAIM` |
-| `configs/aim/raw_custom_layers.yaml` | Custom raw-layer markers |
-| `configs/aim/doping_rules.yaml` | Silicon and doping rules |
-| `configs/aim/render_layers.static.yaml` | Static render layers and z stack |
-| `path/to/layout.gds` | Layout to render |
+| `configs/aim/raw_custom_layers.yaml`      | Custom raw-layer markers                     |
+| `configs/aim/doping_rules.yaml`           | Silicon and doping rules                     |
+| `configs/aim/render_layers.static.yaml`   | Static render layers and z stack             |
+| `path/to/layout.gds`                      | Layout to render                             |
 
 The registry, BlenderGDS stack, visualization GDS, Blender scene, and renders
 are generated locally and ignored by Git. See
@@ -133,12 +133,12 @@ Output:
 
 ## TUAM And PAAM Options
 
-| Final geometry | Build options | Scene |
-| --- | --- | --- |
-| TUAM undercut + PAAM opening | Default | `my_cell.realistic.blend` |
-| TUAM undercut only | `PASSIVATION_OPENING=0` | `my_cell.no-passivation-opening.realistic.blend` |
-| PAAM opening only | `UNDERCUT=0` | `my_cell.no-undercut.realistic.blend` |
-| Neither | `UNDERCUT=0 PASSIVATION_OPENING=0` | `my_cell.no-undercut.no-passivation-opening.realistic.blend` |
+| Final geometry               | Build options                      | Scene                                                        |
+| ---------------------------- | ---------------------------------- | ------------------------------------------------------------ |
+| TUAM undercut + PAAM opening | Default                            | `my_cell.realistic.blend`                                    |
+| TUAM undercut only           | `PASSIVATION_OPENING=0`            | `my_cell.no-passivation-opening.realistic.blend`             |
+| PAAM opening only            | `UNDERCUT=0`                       | `my_cell.no-undercut.realistic.blend`                        |
+| Neither                      | `UNDERCUT=0 PASSIVATION_OPENING=0` | `my_cell.no-undercut.no-passivation-opening.realistic.blend` |
 
 ```sh
 make aim-build GDS=path/to/my_cell.gds UNDERCUT=0 PASSIVATION_OPENING=0
@@ -150,10 +150,8 @@ the same options to `aim-render`.
 
 ## Color Schemes
 
-*All layers using a 100 mm lens.*
-
-| Realistic (default) | Fancy | Marketing |
-| :---: | :---: | :---: |
+|                                 Realistic (default)                                  |                                    Fancy                                     |                                      Marketing                                       |
+| :----------------------------------------------------------------------------------: | :--------------------------------------------------------------------------: | :----------------------------------------------------------------------------------: |
 | ![Realistic color scheme](docs/assets/readme/tx-array-checkered-color-realistic.png) | ![Fancy color scheme](docs/assets/readme/tx-array-checkered-color-fancy.png) | ![Marketing color scheme](docs/assets/readme/tx-array-checkered-color-marketing.png) |
 
 ```sh
@@ -178,9 +176,9 @@ geometry controls, farm/HPC export, Make variables, cleanup, and troubleshooting
 
 ## Common Errors
 
-| Error | Fix |
-| --- | --- |
-| Missing `tech.py` | Supply the PDK tech file or set `AIM_TECH` |
+| Error                           | Fix                                                                    |
+| ------------------------------- | ---------------------------------------------------------------------- |
+| Missing `tech.py`               | Supply the PDK tech file or set `AIM_TECH`                             |
 | BlenderGDS operator unavailable | Install and enable GDSII Importer in the selected Blender installation |
-| Missing preprocessing layer | Check the tech file, `raw_custom_layers.yaml`, and render expressions |
-| Missing preset layer | Use layer names present in the generated scene |
+| Missing preprocessing layer     | Check the tech file, `raw_custom_layers.yaml`, and render expressions  |
+| Missing preset layer            | Use layer names present in the generated scene                         |
