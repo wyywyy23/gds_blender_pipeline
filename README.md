@@ -6,20 +6,23 @@ Convert GDS layouts into editable Blender scenes and reproducible PNG renders.
 external [GDSII Importer](https://extensions.blender.org/add-ons/import-gdsii/),
 which accepts configurable PDK layer stacks.
 
-Output is visualization geometry, not a fabrication GDS.
-
-## Layer Stack
-
-*Cumulative coaxial-disk layer progression using the realistic scheme and a
-300 mm lens. The final frame enables the TUAM undercut and PAAM opening.*
-
-| No backend or cladding | + CBAM | + M1AM |
-| :---: | :---: | :---: |
-| ![No backend or cladding](docs/assets/readme/tx-array-coaxial-stack-00-no-backend.png) | ![Through CBAM](docs/assets/readme/tx-array-coaxial-stack-01-cbam.png) | ![Through M1AM](docs/assets/readme/tx-array-coaxial-stack-02-m1am.png) |
-| **+ V1AM** | **+ M2AM** | **+ VAAM** |
-| ![Through V1AM](docs/assets/readme/tx-array-coaxial-stack-03-v1am.png) | ![Through M2AM](docs/assets/readme/tx-array-coaxial-stack-04-m2am.png) | ![Through VAAM](docs/assets/readme/tx-array-coaxial-stack-05-vaam.png) |
-| **+ MLAM** | **+ Intact cladding** | **+ Undercut + PA opening** |
-| ![Through MLAM](docs/assets/readme/tx-array-coaxial-stack-06-mlam.png) | ![All layers with intact cladding](docs/assets/readme/tx-array-coaxial-stack-07-cladding.png) | ![All layers with undercut and PA opening](docs/assets/readme/tx-array-coaxial-stack-08-openings.png) |
+<table>
+  <tr>
+    <td><img src="docs/assets/readme/tx-array-coaxial-showcase-01.png" alt="Coaxial device render"></td>
+    <td><img src="docs/assets/readme/tx-array-coaxial-showcase-02.png" alt="Coaxial device render"></td>
+    <td><img src="docs/assets/readme/tx-array-coaxial-showcase-03.png" alt="Coaxial device render"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/readme/tx-array-coaxial-showcase-04.png" alt="Coaxial device render"></td>
+    <td><img src="docs/assets/readme/tx-array-coaxial-showcase-05.png" alt="Coaxial device render"></td>
+    <td><img src="docs/assets/readme/tx-array-coaxial-showcase-06.png" alt="Coaxial device render"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/assets/readme/tx-array-coaxial-showcase-07.png" alt="Coaxial device render"></td>
+    <td><img src="docs/assets/readme/tx-array-coaxial-showcase-08.png" alt="Coaxial device render"></td>
+    <td><img src="docs/assets/readme/tx-array-coaxial-showcase-09.png" alt="Coaxial device render"></td>
+  </tr>
+</table>
 
 ## Dependencies
 
@@ -40,7 +43,7 @@ If Blender is not on `PATH`, add `BLENDER=/path/to/blender` to Make commands.
 
 | File | Description |
 | --- | --- |
-| `external_pdks/AIMPhotonics_ACT1/tech.py` | Private AIM technology file containing `LayerMapAIM` |
+| `external_pdks/AIMPhotonics_ACT1/tech.py` | AIM technology file containing `LayerMapAIM` |
 | `configs/aim/raw_custom_layers.yaml` | Custom raw-layer markers |
 | `configs/aim/doping_rules.yaml` | Silicon and doping rules |
 | `configs/aim/render_layers.static.yaml` | Static render layers and z stack |
@@ -48,7 +51,7 @@ If Blender is not on `PATH`, add `BLENDER=/path/to/blender` to Make commands.
 
 The registry, BlenderGDS stack, visualization GDS, Blender scene, and renders
 are generated locally and ignored by Git. See
-[Private AIM Configuration](docs/advanced-usage.md#private-aim-configuration)
+[Configuration Syntax](docs/advanced-usage.md#configuration-syntax)
 for the YAML formats.
 
 ## First Render
@@ -152,7 +155,6 @@ the same options to `aim-render`.
 | Realistic (default) | Fancy | Marketing |
 | :---: | :---: | :---: |
 | ![Realistic color scheme](docs/assets/readme/tx-array-checkered-color-realistic.png) | ![Fancy color scheme](docs/assets/readme/tx-array-checkered-color-fancy.png) | ![Marketing color scheme](docs/assets/readme/tx-array-checkered-color-marketing.png) |
-| Physically plausible materials | Higher color and light contrast | Graphite, champagne, and platinum |
 
 ```sh
 make aim-build GDS=path/to/my_cell.gds SCHEME=fancy
@@ -160,10 +162,10 @@ make aim-build GDS=path/to/my_cell.gds SCHEME=fancy
 
 Pass the same `SCHEME` to `aim-render` to render that scene.
 
-## Output Layout
+## File Structure
 
 ```text
-.local/runs/<layout>/
+.local/runs/<design>/
 ├── visual/              # internal visualization GDS
 ├── blender/             # editable scenes
 └── renders/             # PNG renders
@@ -178,7 +180,7 @@ geometry controls, farm/HPC export, Make variables, cleanup, and troubleshooting
 
 | Error | Fix |
 | --- | --- |
-| Missing `tech.py` | Supply the private PDK file or set `AIM_TECH` |
+| Missing `tech.py` | Supply the PDK tech file or set `AIM_TECH` |
 | BlenderGDS operator unavailable | Install and enable GDSII Importer in the selected Blender installation |
 | Missing preprocessing layer | Check the tech file, `raw_custom_layers.yaml`, and render expressions |
 | Missing preset layer | Use layer names present in the generated scene |

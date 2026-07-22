@@ -432,9 +432,9 @@ Color keys must match layer names in `configs/blender/aim.yaml`.
 | `AIM_RENDER_READY_OUTPUT` | `//renders/<name>` | Stored render path |
 | `AIM_RENDER_READY_PACK` | `1` | Pack external resources |
 
-## Private AIM Configuration
+## Configuration Syntax
 
-These files are local and ignored by Git:
+The AIM workflow uses these source and generated configuration files:
 
 | Path | Generated | Purpose |
 | --- | --- | --- |
