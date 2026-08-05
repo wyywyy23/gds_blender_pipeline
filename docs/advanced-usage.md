@@ -4,19 +4,20 @@ See the [README](../README.md) for installation and the first-render workflow.
 
 ## Make Targets
 
-| Target | Purpose |
-| --- | --- |
-| `aim-build GDS=...` | Build a scene under `.local/runs/<layout>/` |
-| `aim-render GDS=... PRESET=...` | Render a scene previously created by `aim-build` |
-| `aim-run GDS=... PRESET=...` | Rebuild and render with an existing preset |
-| `aim-preprocess AIM_GDS=... AIM_VISUAL_GDS=...` | Create a visualization GDS at explicit paths |
-| `aim-build-scene AIM_GDS=... AIM_VISUAL_GDS=... AIM_BLEND=...` | Preprocess and build at explicit paths |
-| `aim-render-layers` | Generate and merge render-layer metadata |
-| `aim-registry` | Generate the resolved layer registry |
-| `aim-blendergds-config` | Generate the BlenderGDS stack |
-| `aim-render-preset` | Render an explicit `.blend` with an explicit preset |
-| `aim-prepare-render-blend` | Create a portable render-ready `.blend` |
-| `aim-clean-generated` | Remove generated AIM metadata and stack files |
+| Target                                                         | Purpose                                                                       |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `aim-build GDS=...`                                            | Build a scene under `.local/runs/<layout>/`                                   |
+| `aim-render GDS=... PRESET=...`                                | Render a scene previously created by `aim-build`                              |
+| `aim-run GDS=... PRESET=...`                                   | Rebuild and render with an existing preset                                    |
+| `aim-vr-starter GDS=...`                                       | Build a student-ready VR import package (visual GDS + stack + layer manifest) |
+| `aim-preprocess AIM_GDS=... AIM_VISUAL_GDS=...`                | Create a visualization GDS at explicit paths                                  |
+| `aim-build-scene AIM_GDS=... AIM_VISUAL_GDS=... AIM_BLEND=...` | Preprocess and build at explicit paths                                        |
+| `aim-render-layers`                                            | Generate and merge render-layer metadata                                      |
+| `aim-registry`                                                 | Generate the resolved layer registry                                          |
+| `aim-blendergds-config`                                        | Generate the BlenderGDS stack                                                 |
+| `aim-render-preset`                                            | Render an explicit `.blend` with an explicit preset                           |
+| `aim-prepare-render-blend`                                     | Create a portable render-ready `.blend`                                       |
+| `aim-clean-generated`                                          | Remove generated AIM metadata and stack files                                 |
 
 ## Explicit Paths
 
@@ -111,8 +112,65 @@ Direct flags:
 - `--no-undercut`: do not apply TUAM to the etchable substrate and do not
   export the TUAM cladding cutter.
 - `--no-passivation-opening`: do not export the PAAM passivation cutter.
+- `--min-export-z <z>`: export only render layers with configured `zmin >= z`
+  (for example `0.0` to exclude below-zero layers). `CLADDING_RENDER` is kept
+  by default even when its `zmin` is slightly below the threshold.
 
 DIAM processing remains enabled in all four TUAM/PAAM combinations.
+
+## VR Starter Package
+
+Use this mode when students should import a prepared visual GDS in Blender GUI
+without API-side boolean/postprocessing.
+
+```sh
+make aim-vr-starter GDS=path/to/my_cell.gds
+```
+
+The target:
+
+- regenerates AIM metadata,
+- preprocesses to a VR visual GDS with `AIM_PREPROCESS_MIN_Z=0`,
+- disables TUAM/PAAM cutter handling,
+- exports a Blender stack YAML for only present, importable layers,
+- excludes `cladding` and `cladding_cutter` roles from the student import
+  config by default,
+- exports a Blender color scheme YAML filtered to those same importable layers,
+- exports a JSON layer manifest for material/role-based visibility tooling.
+
+The raw VR visual GDS may still contain the generated cladding polygon for
+internal preprocessing consistency, but the default student stack/color/manifest
+omit cladding so Blender GUI import stays simple.
+
+Direct exporter command:
+
+```sh
+conda run -n gds-blender-pipeline python scripts/aim_export_vr_starter_metadata.py \
+  --render-layers configs/aim/render_layers.yaml \
+  --visual-gds .local/runs/my_cell/vr_starter/my_cell.vr.visual.gds \
+  --stack-output .local/runs/my_cell/vr_starter/aim.vr.stack.yaml \
+  --color-source configs/blender/colors/aim/realistic.yaml \
+  --color-output .local/runs/my_cell/vr_starter/aim.vr.colors.yaml \
+  --manifest-output .local/runs/my_cell/vr_starter/layer_manifest.vr.json \
+  --student-legend-output .local/runs/my_cell/vr_starter/layer_legend.student.json \
+  --min-z 0.0
+```
+
+To opt back into cladding for a specific package, override the default role
+filter when running the exporter directly:
+
+```sh
+conda run -n gds-blender-pipeline python scripts/aim_export_vr_starter_metadata.py \
+  --render-layers configs/aim/render_layers.yaml \
+  --visual-gds .local/runs/my_cell/vr_starter/my_cell.vr.visual.gds \
+  --stack-output .local/runs/my_cell/vr_starter/aim.vr.stack.yaml \
+  --color-source configs/blender/colors/aim/realistic.yaml \
+  --color-output .local/runs/my_cell/vr_starter/aim.vr.colors.yaml \
+  --manifest-output .local/runs/my_cell/vr_starter/layer_manifest.vr.json \
+  --student-legend-output .local/runs/my_cell/vr_starter/layer_legend.student.json \
+  --exclude-roles cladding_cutter \
+  --min-z 0.0
+```
 
 ## Scene Building
 
@@ -262,12 +320,12 @@ thickness without changing XY dimensions.
 
 `UNDERCUT` and `PASSIVATION_OPENING` are independent staged-workflow options:
 
-| `UNDERCUT` | `PASSIVATION_OPENING` | Output suffix |
-| --- | --- | --- |
-| `1` | `1` | none |
-| `1` | `0` | `.no-passivation-opening` |
-| `0` | `1` | `.no-undercut` |
-| `0` | `0` | `.no-undercut.no-passivation-opening` |
+| `UNDERCUT` | `PASSIVATION_OPENING` | Output suffix                         |
+| ---------- | --------------------- | ------------------------------------- |
+| `1`        | `1`                   | none                                  |
+| `1`        | `0`                   | `.no-passivation-opening`             |
+| `0`        | `1`                   | `.no-undercut`                        |
+| `0`        | `0`                   | `.no-undercut.no-passivation-opening` |
 
 ```sh
 make aim-build \
@@ -282,11 +340,11 @@ For explicit-path targets, use `AIM_PREPROCESS_UNDERCUT` and
 
 ### Cladding Modes
 
-| Mode | Behavior |
-| --- | --- |
+| Mode      | Behavior                                                                     |
+| --------- | ---------------------------------------------------------------------------- |
 | `boolean` | Import cladding and cutters, subtract openings, and bake the result; default |
-| `solid` | Import uncut cladding without cutters |
-| `omit` | Import neither cladding nor cutters |
+| `solid`   | Import uncut cladding without cutters                                        |
+| `omit`    | Import neither cladding nor cutters                                          |
 
 ```sh
 AIM_BLENDER_CLADDING_MODE=solid make aim-build GDS=path/to/my_cell.gds
@@ -353,11 +411,11 @@ Short names are resolved to render-layer names such as `CBAM_RENDER`.
 
 ## Color Schemes
 
-| File | Style |
-| --- | --- |
+| File                                        | Style                                   |
+| ------------------------------------------- | --------------------------------------- |
 | `configs/blender/colors/aim/realistic.yaml` | Physically plausible materials; default |
-| `configs/blender/colors/aim/fancy.yaml` | High color and light contrast |
-| `configs/blender/colors/aim/marketing.yaml` | Graphite, champagne, and platinum |
+| `configs/blender/colors/aim/fancy.yaml`     | High color and light contrast           |
+| `configs/blender/colors/aim/marketing.yaml` | Graphite, champagne, and platinum       |
 
 Build several schemes with the explicit target:
 
@@ -375,77 +433,77 @@ Color keys must match layer names in `configs/blender/aim.yaml`.
 
 ### Tools And AIM Configuration
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `BLENDER` | `blender` | Blender executable |
-| `AIM_TECH` | `external_pdks/AIMPhotonics_ACT1/tech.py` | Private AIM tech file |
-| `AIM_RAW_CUSTOM` | `configs/aim/raw_custom_layers.yaml` | Custom raw-layer map |
-| `AIM_DOPING_RULES` | `configs/aim/doping_rules.yaml` | Doping rules |
-| `AIM_RENDER_STATIC` | `configs/aim/render_layers.static.yaml` | Static render layers |
-| `AIM_LAYER_REGISTRY` | `configs/aim/layer_registry.local.yaml` | Generated registry |
-| `AIM_BLENDERGDS_CONFIG` | `configs/blender/aim.yaml` | Generated BlenderGDS stack |
+| Variable                | Default                                   | Purpose                    |
+| ----------------------- | ----------------------------------------- | -------------------------- |
+| `BLENDER`               | `blender`                                 | Blender executable         |
+| `AIM_TECH`              | `external_pdks/AIMPhotonics_ACT1/tech.py` | Private AIM tech file      |
+| `AIM_RAW_CUSTOM`        | `configs/aim/raw_custom_layers.yaml`      | Custom raw-layer map       |
+| `AIM_DOPING_RULES`      | `configs/aim/doping_rules.yaml`           | Doping rules               |
+| `AIM_RENDER_STATIC`     | `configs/aim/render_layers.static.yaml`   | Static render layers       |
+| `AIM_LAYER_REGISTRY`    | `configs/aim/layer_registry.local.yaml`   | Generated registry         |
+| `AIM_BLENDERGDS_CONFIG` | `configs/blender/aim.yaml`                | Generated BlenderGDS stack |
 
 ### Staged Workflow
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `GDS` | empty | Raw GDS for `aim-build`, `aim-render`, and `aim-run` |
-| `PRESET` | empty | Preset for `aim-render` and `aim-run` |
-| `SCHEME` | `realistic` | Color scheme for the staged workflow |
-| `UNDERCUT` | `1` | Apply TUAM substrate etch and cladding opening |
-| `PASSIVATION_OPENING` | `1` | Apply the PAAM passivation opening |
-| `AIM_RUN_ROOT` | `.local/runs` | Staged output root |
+| Variable              | Default       | Purpose                                              |
+| --------------------- | ------------- | ---------------------------------------------------- |
+| `GDS`                 | empty         | Raw GDS for `aim-build`, `aim-render`, and `aim-run` |
+| `PRESET`              | empty         | Preset for `aim-render` and `aim-run`                |
+| `SCHEME`              | `realistic`   | Color scheme for the staged workflow                 |
+| `UNDERCUT`            | `1`           | Apply TUAM substrate etch and cladding opening       |
+| `PASSIVATION_OPENING` | `1`           | Apply the PAAM passivation opening                   |
+| `AIM_RUN_ROOT`        | `.local/runs` | Staged output root                                   |
 
 ### Explicit Paths And Scene Controls
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `AIM_GDS` | empty | Raw GDS input |
-| `AIM_VISUAL_GDS` | empty | Visualization GDS output |
-| `AIM_BLEND` | empty | Base scene output; color name is inserted |
-| `AIM_BLENDER_COLORS` | `configs/blender/colors/aim/realistic.yaml` | One or more color files |
-| `AIM_PREPROCESS_MAX_POLYGON_VERTICES` | `256` | Polygon fracture limit |
-| `AIM_PREPROCESS_UNDERCUT` | `1` | Apply TUAM substrate etch and export its cladding cutter |
-| `AIM_PREPROCESS_PASSIVATION_OPENING` | `1` | Export the PAAM passivation cutter |
-| `AIM_BLENDER_Z_SCALE` | `1.0` | Vertical scale |
-| `AIM_BLENDER_CAMERA_FIT_MARGIN` | `1.10` | Camera-fit margin |
-| `AIM_BLENDER_CLADDING_MODE` | `boolean` | `boolean`, `solid`, or `omit` |
-| `AIM_BLENDER_CLADDING_BOOLEAN_SOLVER` | `manifold` | `manifold` or `exact` |
-| `AIM_BLENDER_CLADDING_UNDERCUT_METHOD` | `fractured_batches` | Undercut construction method |
-| `AIM_BLENDER_CLADDING_UNFRACTURED_CUTTER` | empty | Logical-opening sidecar |
-| `AIM_BLENDER_CLADDING_EXPLICIT_MESH` | empty | Explicit cladding sidecar |
-| `AIM_BLENDER_CLADDING_EXPLICIT_CHUNK_SIZE_UM` | `0` | Explicit-mesh chunk size |
-| `AIM_BLENDER_APPLY_CLADDING_BOOLEAN` | `1` | Bake Boolean modifiers |
-| `AIM_BLENDER_DELETE_LAYERS` | empty | Imported layers to remove |
-| `AIM_BLENDER_MERGE_LAYERS` | `0` | Merge BlenderGDS layer fragments |
+| Variable                                      | Default                                     | Purpose                                                  |
+| --------------------------------------------- | ------------------------------------------- | -------------------------------------------------------- |
+| `AIM_GDS`                                     | empty                                       | Raw GDS input                                            |
+| `AIM_VISUAL_GDS`                              | empty                                       | Visualization GDS output                                 |
+| `AIM_BLEND`                                   | empty                                       | Base scene output; color name is inserted                |
+| `AIM_BLENDER_COLORS`                          | `configs/blender/colors/aim/realistic.yaml` | One or more color files                                  |
+| `AIM_PREPROCESS_MAX_POLYGON_VERTICES`         | `256`                                       | Polygon fracture limit                                   |
+| `AIM_PREPROCESS_UNDERCUT`                     | `1`                                         | Apply TUAM substrate etch and export its cladding cutter |
+| `AIM_PREPROCESS_PASSIVATION_OPENING`          | `1`                                         | Export the PAAM passivation cutter                       |
+| `AIM_BLENDER_Z_SCALE`                         | `1.0`                                       | Vertical scale                                           |
+| `AIM_BLENDER_CAMERA_FIT_MARGIN`               | `1.10`                                      | Camera-fit margin                                        |
+| `AIM_BLENDER_CLADDING_MODE`                   | `boolean`                                   | `boolean`, `solid`, or `omit`                            |
+| `AIM_BLENDER_CLADDING_BOOLEAN_SOLVER`         | `manifold`                                  | `manifold` or `exact`                                    |
+| `AIM_BLENDER_CLADDING_UNDERCUT_METHOD`        | `fractured_batches`                         | Undercut construction method                             |
+| `AIM_BLENDER_CLADDING_UNFRACTURED_CUTTER`     | empty                                       | Logical-opening sidecar                                  |
+| `AIM_BLENDER_CLADDING_EXPLICIT_MESH`          | empty                                       | Explicit cladding sidecar                                |
+| `AIM_BLENDER_CLADDING_EXPLICIT_CHUNK_SIZE_UM` | `0`                                         | Explicit-mesh chunk size                                 |
+| `AIM_BLENDER_APPLY_CLADDING_BOOLEAN`          | `1`                                         | Bake Boolean modifiers                                   |
+| `AIM_BLENDER_DELETE_LAYERS`                   | empty                                       | Imported layers to remove                                |
+| `AIM_BLENDER_MERGE_LAYERS`                    | `0`                                         | Merge BlenderGDS layer fragments                         |
 
 ### Rendering
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `AIM_RENDER_BLEND` | empty | Source scene |
-| `AIM_RENDER_PRESET` | empty | Render preset |
-| `AIM_RENDER_RUNS` | all runs | Selected preset runs |
-| `AIM_RENDER_OUTPUT_DIR` | preset directory | Output override |
-| `AIM_RENDER_READY_RUN` | `all_layers` | Run baked into a portable scene |
-| `AIM_RENDER_READY_BLEND` | generated beside source | Portable scene output |
-| `AIM_RENDER_READY_OUTPUT` | `//renders/<name>` | Stored render path |
-| `AIM_RENDER_READY_PACK` | `1` | Pack external resources |
+| Variable                  | Default                 | Purpose                         |
+| ------------------------- | ----------------------- | ------------------------------- |
+| `AIM_RENDER_BLEND`        | empty                   | Source scene                    |
+| `AIM_RENDER_PRESET`       | empty                   | Render preset                   |
+| `AIM_RENDER_RUNS`         | all runs                | Selected preset runs            |
+| `AIM_RENDER_OUTPUT_DIR`   | preset directory        | Output override                 |
+| `AIM_RENDER_READY_RUN`    | `all_layers`            | Run baked into a portable scene |
+| `AIM_RENDER_READY_BLEND`  | generated beside source | Portable scene output           |
+| `AIM_RENDER_READY_OUTPUT` | `//renders/<name>`      | Stored render path              |
+| `AIM_RENDER_READY_PACK`   | `1`                     | Pack external resources         |
 
 ## Configuration Syntax
 
 The AIM workflow uses these source and generated configuration files:
 
-| Path | Generated | Purpose |
-| --- | --- | --- |
-| `external_pdks/AIMPhotonics_ACT1/tech.py` | No | AIM tech file with `LayerMapAIM` |
-| `configs/aim/raw_custom_layers.yaml` | No | Custom raw markers |
-| `configs/aim/doping_rules.yaml` | No | Silicon and doping rules |
-| `configs/aim/render_layers.static.yaml` | No | Static render layers |
-| `configs/aim/render_layers.doping.generated.yaml` | Yes | Doping-derived render layers |
-| `configs/aim/render_layers.yaml` | Yes | Merged render layers |
-| `configs/aim/layer_registry.local.yaml` | Yes | Resolved registry |
-| `configs/blender/aim.yaml` | Yes | BlenderGDS stack |
+| Path                                              | Generated | Purpose                          |
+| ------------------------------------------------- | --------- | -------------------------------- |
+| `external_pdks/AIMPhotonics_ACT1/tech.py`         | No        | AIM tech file with `LayerMapAIM` |
+| `configs/aim/raw_custom_layers.yaml`              | No        | Custom raw markers               |
+| `configs/aim/doping_rules.yaml`                   | No        | Silicon and doping rules         |
+| `configs/aim/render_layers.static.yaml`           | No        | Static render layers             |
+| `configs/aim/render_layers.doping.generated.yaml` | Yes       | Doping-derived render layers     |
+| `configs/aim/render_layers.yaml`                  | Yes       | Merged render layers             |
+| `configs/aim/layer_registry.local.yaml`           | Yes       | Resolved registry                |
+| `configs/blender/aim.yaml`                        | Yes       | BlenderGDS stack                 |
 
 The registry builder parses the tech file with Python AST; it does not import
 the PDK.
@@ -531,12 +589,12 @@ remove scenes, renders, private PDK files, or hand-maintained configuration.
 
 ## Troubleshooting
 
-| Error | Check |
-| --- | --- |
-| Missing tech file | `AIM_TECH` and the private PDK path |
-| Missing `LayerMapAIM` | Tech file and class name |
+| Error                           | Check                                                       |
+| ------------------------------- | ----------------------------------------------------------- |
+| Missing tech file               | `AIM_TECH` and the private PDK path                         |
+| Missing `LayerMapAIM`           | Tech file and class name                                    |
 | BlenderGDS operator unavailable | GDSII Importer installation in the selected Blender profile |
-| Missing render layer | Expressions in the tech file and local YAML |
-| Empty output layer | Raw layout layers and derived-region offsets |
-| Missing preset layer | Object names in the source `.blend` |
-| Missing farm asset | Resource packing or staged shared assets |
+| Missing render layer            | Expressions in the tech file and local YAML                 |
+| Empty output layer              | Raw layout layers and derived-region offsets                |
+| Missing preset layer            | Object names in the source `.blend`                         |
+| Missing farm asset              | Resource packing or staged shared assets                    |

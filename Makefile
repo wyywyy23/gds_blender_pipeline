@@ -27,6 +27,7 @@ AIM_BLENDER_APPLY_CLADDING_BOOLEAN ?= 1
 AIM_PREPROCESS_MAX_POLYGON_VERTICES ?= 256
 AIM_PREPROCESS_UNDERCUT ?= 1
 AIM_PREPROCESS_PASSIVATION_OPENING ?= 1
+AIM_PREPROCESS_MIN_Z ?=
 AIM_BLENDER_MERGE_LAYERS ?= 0
 
 AIM_GDS ?=
@@ -57,12 +58,19 @@ AIM_RUN_BASE_BLEND = $(AIM_RUN_DIR)/blender/$(AIM_RUN_NAME)$(AIM_RUN_VARIANT_SUF
 AIM_RUN_SCHEME_CONFIG = $(AIM_BLENDER_COLOR_DIR)/$(SCHEME).yaml
 AIM_RUN_BLEND = $(AIM_RUN_DIR)/blender/$(AIM_RUN_NAME)$(AIM_RUN_VARIANT_SUFFIX).$(SCHEME).blend
 AIM_RUN_RENDER_DIR = $(AIM_RUN_DIR)/renders
+AIM_RUN_VR_DIR = $(AIM_RUN_DIR)/vr_starter
+AIM_RUN_VR_VISUAL_GDS = $(AIM_RUN_VR_DIR)/$(AIM_RUN_NAME).vr.visual.gds
+AIM_RUN_VR_STACK = $(AIM_RUN_VR_DIR)/aim.vr.stack.yaml
+AIM_RUN_VR_COLORS = $(AIM_RUN_VR_DIR)/aim.vr.colors.yaml
+AIM_RUN_VR_MANIFEST = $(AIM_RUN_VR_DIR)/layer_manifest.vr.json
+AIM_RUN_VR_STUDENT_LEGEND = $(AIM_RUN_VR_DIR)/layer_legend.student.json
+AIM_RUN_VR_README = $(AIM_RUN_VR_DIR)/README.vr-starter.md
 
 .PHONY: \
 	env env-update env-remove env-info \
 	aim-render-layers aim-registry aim-blendergds-config \
 	aim-preprocess aim-build-scene aim-render-preset aim-prepare-render-blend \
-	aim-build aim-render aim-run aim-clean-generated
+	aim-build aim-render aim-run aim-vr-starter aim-clean-generated
 
 aim-build:
 	@test -n "$(strip $(GDS))" || { echo "Usage: make aim-build GDS=path/to/input.gds"; exit 2; }
@@ -79,6 +87,7 @@ aim-build:
 		AIM_PREPROCESS_MAX_POLYGON_VERTICES="$(AIM_PREPROCESS_MAX_POLYGON_VERTICES)" \
 		AIM_PREPROCESS_UNDERCUT="$(UNDERCUT)" \
 		AIM_PREPROCESS_PASSIVATION_OPENING="$(PASSIVATION_OPENING)" \
+		AIM_PREPROCESS_MIN_Z="$(AIM_PREPROCESS_MIN_Z)" \
 		AIM_BLENDER_Z_SCALE="$(AIM_BLENDER_Z_SCALE)" \
 		AIM_BLENDER_CAMERA_FIT_MARGIN="$(AIM_BLENDER_CAMERA_FIT_MARGIN)" \
 		AIM_BLENDER_CLADDING_MODE="$(AIM_BLENDER_CLADDING_MODE)" \
@@ -177,6 +186,7 @@ aim-preprocess:
 		--registry "$(AIM_LAYER_REGISTRY)" \
 		--output "$(AIM_VISUAL_GDS)" \
 		--max-polygon-vertices "$(AIM_PREPROCESS_MAX_POLYGON_VERTICES)" \
+		$(if $(strip $(AIM_PREPROCESS_MIN_Z)),--min-export-z "$(AIM_PREPROCESS_MIN_Z)") \
 		$(if $(filter 0 false no,$(AIM_PREPROCESS_UNDERCUT)),--no-undercut) \
 		$(if $(filter 0 false no,$(AIM_PREPROCESS_PASSIVATION_OPENING)),--no-passivation-opening)
 
@@ -195,7 +205,8 @@ aim-build-scene:
 		AIM_GDS="$(AIM_GDS)" \
 		AIM_VISUAL_GDS="$(AIM_VISUAL_GDS)" \
 		AIM_PREPROCESS_UNDERCUT="$(AIM_PREPROCESS_UNDERCUT)" \
-		AIM_PREPROCESS_PASSIVATION_OPENING="$(AIM_PREPROCESS_PASSIVATION_OPENING)"
+		AIM_PREPROCESS_PASSIVATION_OPENING="$(AIM_PREPROCESS_PASSIVATION_OPENING)" \
+		AIM_PREPROCESS_MIN_Z="$(AIM_PREPROCESS_MIN_Z)"
 	mkdir -p "$(dir $(AIM_BLEND))"
 	@blend_dir=$$(dirname "$(AIM_BLEND)"); \
 	blend_stem=$$(basename "$(AIM_BLEND)" .blend); \
@@ -244,6 +255,45 @@ aim-prepare-render-blend:
 		$(if $(strip $(AIM_RENDER_READY_BLEND)),--output "$(AIM_RENDER_READY_BLEND)") \
 		$(if $(strip $(AIM_RENDER_READY_OUTPUT)),--render-output "$(AIM_RENDER_READY_OUTPUT)") \
 		$(if $(filter 0 false no,$(AIM_RENDER_READY_PACK)),--no-pack-resources)
+
+aim-vr-starter:
+	@test -n "$(strip $(GDS))" || { echo "Usage: make aim-vr-starter GDS=path/to/input.gds"; exit 2; }
+	@test -f "$(GDS)" || { echo "GDS file not found: $(GDS)"; exit 2; }
+	@echo "Building VR starter package from $(GDS)"
+	+$(MAKE) aim-preprocess \
+		AIM_GDS="$(GDS)" \
+		AIM_VISUAL_GDS="$(AIM_RUN_VR_VISUAL_GDS)" \
+		AIM_PREPROCESS_UNDERCUT=0 \
+		AIM_PREPROCESS_PASSIVATION_OPENING=0 \
+		AIM_PREPROCESS_MIN_Z=0
+	conda run -n $(ENV_NAME) python scripts/aim_export_vr_starter_metadata.py \
+		--render-layers "$(AIM_RENDER_LAYERS)" \
+		--visual-gds "$(AIM_RUN_VR_VISUAL_GDS)" \
+		--stack-output "$(AIM_RUN_VR_STACK)" \
+		--color-source "$(AIM_BLENDER_COLOR_DIR)/realistic.yaml" \
+		--color-output "$(AIM_RUN_VR_COLORS)" \
+		--manifest-output "$(AIM_RUN_VR_MANIFEST)" \
+		--student-legend-output "$(AIM_RUN_VR_STUDENT_LEGEND)" \
+		--min-z 0.0
+	@printf '%s\n' \
+		'# VR Starter Package' \
+		'' \
+		'- visual GDS: $(AIM_RUN_VR_VISUAL_GDS)' \
+		'- Blender GDS stack config: $(AIM_RUN_VR_STACK)' \
+		'- Blender color scheme: $(AIM_RUN_VR_COLORS)' \
+		'- Layer manifest JSON: $(AIM_RUN_VR_MANIFEST)' \
+		'- Student layer legend JSON: $(AIM_RUN_VR_STUDENT_LEGEND)' \
+		'- Default student import excludes cladding and cladding cutters.' \
+		'' \
+		'Blender GUI import steps:' \
+		'1. Open Blender and make sure GDSII Importer add-on is enabled.' \
+		'2. File > Import > GDSII.' \
+		'3. Select $(AIM_RUN_VR_VISUAL_GDS).' \
+		'4. Use stack config file: $(AIM_RUN_VR_STACK).' \
+		'5. Use color scheme file: $(AIM_RUN_VR_COLORS).' \
+		'6. Import. Use layer_legend.student.json for quick layer-number meaning and layer_manifest.vr.json for advanced metadata.' \
+		> "$(AIM_RUN_VR_README)"
+	@echo "VR starter package ready: $(AIM_RUN_VR_DIR)"
 
 aim-clean-generated:
 	rm -f $(AIM_RENDER_DOPING)

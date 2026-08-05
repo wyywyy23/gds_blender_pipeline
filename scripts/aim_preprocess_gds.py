@@ -38,7 +38,6 @@ from gdsfactory.typings import CornerMode
 from kfactory import kdb
 import yaml
 
-
 OFFSET_WORK_LAYER = (9000, 0)
 
 
@@ -100,6 +99,37 @@ def get_layer(render_layers: dict[str, dict[str, Any]], name: str) -> tuple[int,
     return normalize_layer_pair(entry["layer"])
 
 
+def get_layer_zmin(render_layers: dict[str, dict[str, Any]], name: str) -> float:
+    if name not in render_layers:
+        raise KeyError(f"Missing render layer in registry: {name}")
+
+    entry = render_layers[name]
+    zmin = entry.get("zmin")
+    if not isinstance(zmin, (int, float)):
+        raise ValueError(f"Render layer {name} has invalid zmin: {zmin!r}")
+
+    return float(zmin)
+
+
+def should_export_render_layer(
+    render_layers: dict[str, dict[str, Any]],
+    name: str,
+    *,
+    min_export_z: float | None,
+) -> bool:
+    entry = render_layers.get(name)
+    if not isinstance(entry, dict):
+        return False
+
+    # Keep cladding by default even when an epsilon overlap makes zmin < 0.
+    if entry.get("role") == "cladding" or name == "CLADDING_RENDER":
+        return True
+
+    if min_export_z is None:
+        return True
+    return get_layer_zmin(render_layers, name) >= min_export_z
+
+
 def get_input_layers(registry: dict[str, Any]) -> dict[str, tuple[int, int]]:
     input_layers = registry.get("input_layers", {})
     if not isinstance(input_layers, dict):
@@ -111,7 +141,9 @@ def get_input_layers(registry: dict[str, Any]) -> dict[str, tuple[int, int]]:
             raise ValueError(f"Registry input_layers.{group_name} must be a mapping")
         for name, entry in group.items():
             if not isinstance(entry, dict) or "layer" not in entry:
-                raise ValueError(f"Registry input_layers.{group_name}.{name} has no layer")
+                raise ValueError(
+                    f"Registry input_layers.{group_name}.{name} has no layer"
+                )
             out[str(name)] = normalize_layer_pair(entry["layer"])
 
     return out
@@ -140,7 +172,9 @@ def get_doping_rules(registry: dict[str, Any]) -> dict[str, Any]:
     if doping_rules is None:
         doping_rules = processing.get("doping_rules")
     if not isinstance(doping_rules, dict):
-        raise ValueError("Registry processing.silicon_doping_resolution must be a mapping")
+        raise ValueError(
+            "Registry processing.silicon_doping_resolution must be a mapping"
+        )
 
     return doping_rules
 
@@ -485,7 +519,9 @@ def build_derived_regions(
 
         source = spec.get("source")
         if not isinstance(source, str) or not source:
-            raise ValueError(f"derived_regions.{name}.source must be a non-empty string")
+            raise ValueError(
+                f"derived_regions.{name}.source must be a non-empty string"
+            )
 
         symbols = input_regions | derived_regions
         if source not in symbols:
@@ -531,7 +567,9 @@ def evaluate_region_expression(
             return eval_node(node.body)
         if isinstance(node, ast.Name):
             if node.id not in symbols:
-                raise KeyError(f"Region expression references unknown symbol: {node.id}")
+                raise KeyError(
+                    f"Region expression references unknown symbol: {node.id}"
+                )
             return symbols[node.id].dup()
         if isinstance(node, ast.BinOp):
             left = eval_node(node.left)
@@ -741,12 +779,10 @@ def resolve_silicon_slice_regions(
         raise ValueError(f"PN doping overlap in {body}.{slice_name}")
     if pn_policy == "debug_layer":
         resolved_n = {
-            rank: merge_region(region - conflict)
-            for rank, region in resolved_n.items()
+            rank: merge_region(region - conflict) for rank, region in resolved_n.items()
         }
         resolved_p = {
-            rank: merge_region(region - conflict)
-            for rank, region in resolved_p.items()
+            rank: merge_region(region - conflict) for rank, region in resolved_p.items()
         }
         conflict_region = conflict
     elif pn_policy == "ignore":
@@ -754,7 +790,9 @@ def resolve_silicon_slice_regions(
     elif pn_policy == "error":
         conflict_region = kdb.Region()
     else:
-        raise ValueError("conflict_policy.pn_overlap must be debug_layer, error, or ignore")
+        raise ValueError(
+            "conflict_policy.pn_overlap must be debug_layer, error, or ignore"
+        )
 
     doped_regions: dict[tuple[str, int], kdb.Region] = {}
     for rank, region in resolved_n.items():
@@ -779,6 +817,7 @@ def add_silicon_regions(
     doping_rules: dict[str, Any],
     input_regions: dict[str, kdb.Region],
     region_symbols: dict[str, kdb.Region],
+    min_export_z: float | None,
 ) -> dict[str, int]:
     layer_index = index_silicon_render_layers(render_layers)
     body_regions = build_silicon_body_regions(
@@ -808,22 +847,28 @@ def add_silicon_regions(
         intrinsic_entry = layer_index["intrinsic"].get((body, slice_name))
         if intrinsic_entry is None:
             raise KeyError(f"Missing intrinsic render layer for {body}.{slice_name}")
-        _, intrinsic_layer = intrinsic_entry
-        intrinsic_region = resolved["intrinsic"]
-        add_region(c_out, region=intrinsic_region, layer=intrinsic_layer)
-        if not intrinsic_region.is_empty():
-            stats["intrinsic_nonempty"] += 1
-            stats["total_nonempty"] += 1
+        intrinsic_name, intrinsic_layer = intrinsic_entry
+        if should_export_render_layer(
+            render_layers, intrinsic_name, min_export_z=min_export_z
+        ):
+            intrinsic_region = resolved["intrinsic"]
+            add_region(c_out, region=intrinsic_region, layer=intrinsic_layer)
+            if not intrinsic_region.is_empty():
+                stats["intrinsic_nonempty"] += 1
+                stats["total_nonempty"] += 1
 
         conflict_entry = layer_index["conflict"].get((body, slice_name))
         if conflict_entry is None:
             raise KeyError(f"Missing PN conflict render layer for {body}.{slice_name}")
-        _, conflict_layer = conflict_entry
-        conflict_region = resolved["conflict"]
-        add_region(c_out, region=conflict_region, layer=conflict_layer)
-        if not conflict_region.is_empty():
-            stats["conflict_nonempty"] += 1
-            stats["total_nonempty"] += 1
+        conflict_name, conflict_layer = conflict_entry
+        if should_export_render_layer(
+            render_layers, conflict_name, min_export_z=min_export_z
+        ):
+            conflict_region = resolved["conflict"]
+            add_region(c_out, region=conflict_region, layer=conflict_layer)
+            if not conflict_region.is_empty():
+                stats["conflict_nonempty"] += 1
+                stats["total_nonempty"] += 1
 
         for (polarity, rank), doped_region in resolved["doped"].items():
             doped_entry = layer_index["doped"].get((body, slice_name, polarity, rank))
@@ -831,11 +876,14 @@ def add_silicon_regions(
                 raise KeyError(
                     f"Missing doped render layer for {body}.{slice_name}.{polarity}{rank}"
                 )
-            _, doped_layer = doped_entry
-            add_region(c_out, region=doped_region, layer=doped_layer)
-            if not doped_region.is_empty():
-                stats["doped_nonempty"] += 1
-                stats["total_nonempty"] += 1
+            doped_name, doped_layer = doped_entry
+            if should_export_render_layer(
+                render_layers, doped_name, min_export_z=min_export_z
+            ):
+                add_region(c_out, region=doped_region, layer=doped_layer)
+                if not doped_region.is_empty():
+                    stats["doped_nonempty"] += 1
+                    stats["total_nonempty"] += 1
 
     return stats
 
@@ -846,6 +894,7 @@ def add_static_expression_render_layers(
     render_layers: dict[str, dict[str, Any]],
     region_symbols: dict[str, kdb.Region],
     handled_layers: set[str],
+    min_export_z: float | None,
 ) -> dict[str, int]:
     stats = {
         "candidate": 0,
@@ -857,6 +906,10 @@ def add_static_expression_render_layers(
         if name in handled_layers:
             continue
         if not isinstance(spec, dict) or spec.get("source") != "static":
+            continue
+        if not should_export_render_layer(
+            render_layers, name, min_export_z=min_export_z
+        ):
             continue
 
         expression = spec.get("expression")
@@ -886,6 +939,7 @@ def preprocess_aim_gds(
     max_polygon_vertices: int | None = None,
     include_undercut: bool = True,
     include_passivation_opening: bool = True,
+    min_export_z: float | None = None,
     show: bool = False,
 ) -> gf.Component:
     ensure_active_pdk()
@@ -914,26 +968,22 @@ def preprocess_aim_gds(
         not isinstance(cladding_exclusion_expression, str)
         or not cladding_exclusion_expression.strip()
     ):
-        raise ValueError("CLADDING_RENDER.preprocessing_exclusion_expression must be set")
+        raise ValueError(
+            "CLADDING_RENDER.preprocessing_exclusion_expression must be set"
+        )
 
     cladding_undercut_cutter = render_layers["CLADDING_UNDERCUT_CUTTER_RENDER"]
     cladding_undercut_cutter_layer = get_layer(
         render_layers, "CLADDING_UNDERCUT_CUTTER_RENDER"
     )
-    cladding_undercut_cutter_expression = cladding_undercut_cutter.get(
-        "expression"
-    )
+    cladding_undercut_cutter_expression = cladding_undercut_cutter.get("expression")
     if (
         not isinstance(cladding_undercut_cutter_expression, str)
         or not cladding_undercut_cutter_expression.strip()
     ):
-        raise ValueError(
-            "CLADDING_UNDERCUT_CUTTER_RENDER.expression must be set"
-        )
+        raise ValueError("CLADDING_UNDERCUT_CUTTER_RENDER.expression must be set")
 
-    cladding_passivation_cutter = render_layers[
-        "CLADDING_PASSIVATION_CUTTER_RENDER"
-    ]
+    cladding_passivation_cutter = render_layers["CLADDING_PASSIVATION_CUTTER_RENDER"]
     cladding_passivation_cutter_layer = get_layer(
         render_layers, "CLADDING_PASSIVATION_CUTTER_RENDER"
     )
@@ -944,9 +994,7 @@ def preprocess_aim_gds(
         not isinstance(cladding_passivation_cutter_expression, str)
         or not cladding_passivation_cutter_expression.strip()
     ):
-        raise ValueError(
-            "CLADDING_PASSIVATION_CUTTER_RENDER.expression must be set"
-        )
+        raise ValueError("CLADDING_PASSIVATION_CUTTER_RENDER.expression must be set")
 
     bbox_margin = (
         float(bbox_margin_override)
@@ -992,35 +1040,60 @@ def preprocess_aim_gds(
     if c_out.kcl.dbu != dbu:
         raise RuntimeError(f"Output dbu {c_out.kcl.dbu} does not match input dbu {dbu}")
 
-    add_region(
-        c_out,
-        region=substrate_region,
-        layer=substrate_base_layer,
-    )
+    if should_export_render_layer(
+        render_layers,
+        "SUBSTRATE_BASE_RENDER",
+        min_export_z=min_export_z,
+    ):
+        add_region(
+            c_out,
+            region=substrate_region,
+            layer=substrate_base_layer,
+        )
 
-    add_region(
-        c_out,
-        region=substrate_etchable_region,
-        layer=substrate_etchable_layer,
-    )
+    if should_export_render_layer(
+        render_layers,
+        "SUBSTRATE_ETCHABLE_RENDER",
+        min_export_z=min_export_z,
+    ):
+        add_region(
+            c_out,
+            region=substrate_etchable_region,
+            layer=substrate_etchable_layer,
+        )
 
-    add_region(
-        c_out,
-        region=cladding_region,
-        layer=cladding_layer,
-    )
+    if should_export_render_layer(
+        render_layers,
+        "CLADDING_RENDER",
+        min_export_z=min_export_z,
+    ):
+        add_region(
+            c_out,
+            region=cladding_region,
+            layer=cladding_layer,
+        )
 
-    add_region(
-        c_out,
-        region=cladding_undercut_cutter_region,
-        layer=cladding_undercut_cutter_layer,
-    )
+    if should_export_render_layer(
+        render_layers,
+        "CLADDING_UNDERCUT_CUTTER_RENDER",
+        min_export_z=min_export_z,
+    ):
+        add_region(
+            c_out,
+            region=cladding_undercut_cutter_region,
+            layer=cladding_undercut_cutter_layer,
+        )
 
-    add_region(
-        c_out,
-        region=cladding_passivation_cutter_region,
-        layer=cladding_passivation_cutter_layer,
-    )
+    if should_export_render_layer(
+        render_layers,
+        "CLADDING_PASSIVATION_CUTTER_RENDER",
+        min_export_z=min_export_z,
+    ):
+        add_region(
+            c_out,
+            region=cladding_passivation_cutter_region,
+            layer=cladding_passivation_cutter_layer,
+        )
 
     silicon_stats = add_silicon_regions(
         c_out=c_out,
@@ -1028,6 +1101,7 @@ def preprocess_aim_gds(
         doping_rules=doping_rules,
         input_regions=input_regions,
         region_symbols=region_symbols,
+        min_export_z=min_export_z,
     )
     static_expression_stats = add_static_expression_render_layers(
         c_out=c_out,
@@ -1040,6 +1114,7 @@ def preprocess_aim_gds(
             "CLADDING_UNDERCUT_CUTTER_RENDER",
             "CLADDING_PASSIVATION_CUTTER_RENDER",
         },
+        min_export_z=min_export_z,
     )
 
     fracture_stats = None
@@ -1066,6 +1141,8 @@ def preprocess_aim_gds(
         "PAAM passivation opening: "
         f"{'enabled' if include_passivation_opening else 'disabled'}"
     )
+    if min_export_z is not None:
+        print(f"Minimum exported layer zmin: {min_export_z:.3f} um")
     print(f"Render bbox size: {size[0]:.3f} x {size[1]:.3f} um")
     print(f"Render bbox center: ({center[0]:.3f}, {center[1]:.3f})")
     print(f"SUBSTRATE_BASE_RENDER layer: {substrate_base_layer}")
@@ -1077,21 +1154,17 @@ def preprocess_aim_gds(
         f"{count_region_polygons(substrate_etchable_region)}"
     )
     print(f"CLADDING_RENDER layer: {cladding_layer}")
-    print(
-        "CLADDING_UNDERCUT_CUTTER_RENDER layer: "
-        f"{cladding_undercut_cutter_layer}"
-    )
+    print("CLADDING_UNDERCUT_CUTTER_RENDER layer: " f"{cladding_undercut_cutter_layer}")
     print(
         "CLADDING_PASSIVATION_CUTTER_RENDER layer: "
         f"{cladding_passivation_cutter_layer}"
     )
     print(f"Cladding exclusion expression: {cladding_exclusion_expression}")
-    print(f"Cladding exclusion polygons: {count_region_polygons(cladding_exclusion_region)}")
-    print(f"Undercut cutter expression: {cladding_undercut_cutter_expression}")
     print(
-        "Passivation cutter expression: "
-        f"{cladding_passivation_cutter_expression}"
+        f"Cladding exclusion polygons: {count_region_polygons(cladding_exclusion_region)}"
     )
+    print(f"Undercut cutter expression: {cladding_undercut_cutter_expression}")
+    print("Passivation cutter expression: " f"{cladding_passivation_cutter_expression}")
     print(f"CLADDING_RENDER polygons: {count_region_polygons(cladding_region)}")
     print(
         "CLADDING_UNDERCUT_CUTTER_RENDER polygons: "
@@ -1162,14 +1235,20 @@ def main() -> None:
         "--passivation-opening",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help=(
-            "Export the PAAM passivation-opening cutter (default: enabled)"
-        ),
+        help=("Export the PAAM passivation-opening cutter (default: enabled)"),
     )
     parser.add_argument(
         "--show",
         action="store_true",
         help="Open output component in KLayout via gdsfactory",
+    )
+    parser.add_argument(
+        "--min-export-z",
+        type=float,
+        default=None,
+        help=(
+            "Only export render layers whose configured zmin is >= this value " "(um)."
+        ),
     )
     args = parser.parse_args()
 
@@ -1181,6 +1260,7 @@ def main() -> None:
         max_polygon_vertices=args.max_polygon_vertices,
         include_undercut=args.undercut,
         include_passivation_opening=args.passivation_opening,
+        min_export_z=args.min_export_z,
         show=args.show,
     )
 
