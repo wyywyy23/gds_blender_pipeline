@@ -1,0 +1,35 @@
+version: 1
+name: mcm_oak_oblique_100mm
+
+camera:
+  object: Camera
+  type: PERSP
+  location: [-5000.0, -10000.0, 10000.0]
+  rotation_degrees: [52.0, 0.0, -30.0]
+  lens_mm: 100.0
+  clip_start: 0.000001
+  clip_end: 30000.0
+
+lighting:
+  sun:
+    object: Sun
+    strength: 5.0
+
+color_management:
+  view_transform: AgX
+  look: AgX - High Contrast
+
+render:
+  engine: CYCLES
+  samples: 1024
+  denoise: false
+  adaptive_sampling: false
+  file_format: PNG
+  transparent: true
+
+output:
+  directory: examples/aim/blender/renders/mcm_oak
+
+runs:
+  - name: all_layers
+    hide_layers: []

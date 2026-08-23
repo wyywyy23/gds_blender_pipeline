@@ -208,12 +208,16 @@ def load_preset(path: Path) -> dict[str, Any]:
         raise ValueError(
             f"render.file_format must be one of: {', '.join(FORMAT_EXTENSIONS)}"
         )
+    transparent = render_data.get("transparent", False)
+    if not isinstance(transparent, bool):
+        raise ValueError("render.transparent must be true or false")
     render = {
         "engine": str(render_data.get("engine", "CYCLES")).upper(),
         "samples": samples,
         "denoise": denoise,
         "adaptive_sampling": adaptive_sampling,
         "file_format": file_format,
+        "transparent": transparent,
     }
     if render["engine"] != "CYCLES":
         raise ValueError("Only the CYCLES render engine is currently supported")
@@ -447,6 +451,7 @@ def apply_render_settings(scene: Any, render_config: dict[str, Any]) -> None:
                 node.mute = not render_config["denoise"]
 
     scene.render.image_settings.file_format = render_config["file_format"]
+    scene.render.film_transparent = render_config["transparent"]
     scene.render.use_file_extension = True
     print(
         "Render preset: "
