@@ -10,6 +10,8 @@ See the [README](../README.md) for installation and the first-render workflow.
 | `aim-render GDS=... PRESET=...`                                | Render a scene previously created by `aim-build`                              |
 | `aim-run GDS=... PRESET=...`                                   | Rebuild and render with an existing preset                                    |
 | `aim-vr-starter GDS=...`                                       | Build a student-ready VR import package (visual GDS + stack + layer manifest) |
+| `aim-realtime-spike`                                           | Export the existing Ramzi Blender scene to GLB                               |
+| `aim-serve-viewer`                                             | Serve the Babylon.js viewer and generated GLB locally                         |
 | `aim-preprocess AIM_GDS=... AIM_VISUAL_GDS=...`                | Create a visualization GDS at explicit paths                                  |
 | `aim-build-scene AIM_GDS=... AIM_VISUAL_GDS=... AIM_BLEND=...` | Preprocess and build at explicit paths                                        |
 | `aim-render-layers`                                            | Generate and merge render-layer metadata                                      |
@@ -171,6 +173,37 @@ conda run -n gds-blender-pipeline python scripts/aim_export_vr_starter_metadata.
   --exclude-roles cladding_cutter \
   --min-z 0.0
 ```
+
+## Realtime Presentation Spike
+
+The first short-cycle sample reuses the existing Ramzi Blender scene as a GLB
+bridge and opens it in a small Babylon.js viewer. This path does **not** invoke
+`aim-preprocess` or `aim-build`, so it does not add or change any flattening step.
+
+Export the generated presentation artifact:
+
+```sh
+make aim-realtime-spike \
+  AIM_REALTIME_BLEND=examples/aim/blender/ramzi.realistic.blend \
+  AIM_REALTIME_GLB=.local/runs/ramzi/realtime/ramzi.realistic.glb
+```
+
+Then serve the repository root and open the URL printed by Make:
+
+```sh
+make aim-serve-viewer
+```
+
+The viewer provides orbit, pan, zoom, iso/top/front presets, fit-to-model, and
+independent layer and material visibility. Blender object extras preserve the
+GDS render-layer name in the GLB; the viewer also falls back to the existing
+`L<layer>` object and `Mat_<layer>` material naming convention.
+
+The Babylon.js runtime and GLB loader are loaded from the official Babylon CDN
+for this spike. Vendor or bundle those dependencies before relying on the viewer
+for an offline presentation. The `.glb` remains ignored generated output and can
+be rebuilt; the GDS and registered local PDK/config inputs remain the source of
+truth and the cross-device manual-file boundary.
 
 ## Scene Building
 

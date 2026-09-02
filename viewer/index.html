@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0b1020">
+    <title>GDS Realtime Viewer</title>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script defer src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="viewport" aria-label="Interactive 3D viewport">
+        <canvas id="render-canvas" tabindex="0"></canvas>
+        <div class="viewport-bar">
+          <div>
+            <p class="eyebrow">GDS realtime spike</p>
+            <h1 id="model-title">ramzi.realistic.glb</h1>
+          </div>
+          <div class="view-actions" aria-label="Camera presets">
+            <button type="button" data-view="iso">Iso</button>
+            <button type="button" data-view="top">Top</button>
+            <button type="button" data-view="front">Front</button>
+            <button type="button" id="fit-view">Fit</button>
+          </div>
+        </div>
+        <div id="loading-card" class="loading-card" role="status">
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="loading-message">Loading GLB…</span>
+        </div>
+        <p class="gesture-hint">Drag to orbit · Right-drag to pan · Scroll to zoom</p>
+      </section>
+
+      <aside class="control-panel" aria-label="Scene visibility controls">
+        <header class="panel-header">
+          <div>
+            <p class="eyebrow">Scene controls</p>
+            <h2>Visibility</h2>
+          </div>
+          <span id="scene-status" class="status-pill">Starting</span>
+        </header>
+
+        <section class="summary-card" aria-live="polite">
+          <strong id="visible-count">0 / 0 meshes</strong>
+          <span id="model-detail">Waiting for model metadata</span>
+        </section>
+
+        <section class="control-group">
+          <div class="group-heading">
+            <h3>Layers</h3>
+            <div class="mini-actions">
+              <button type="button" data-toggle="layers" data-value="all">All</button>
+              <button type="button" data-toggle="layers" data-value="none">None</button>
+            </div>
+          </div>
+          <div id="layer-controls" class="check-list"></div>
+        </section>
+
+        <section class="control-group">
+          <div class="group-heading">
+            <h3>Materials</h3>
+            <div class="mini-actions">
+              <button type="button" data-toggle="materials" data-value="all">All</button>
+              <button type="button" data-toggle="materials" data-value="none">None</button>
+            </div>
+          </div>
+          <div id="material-controls" class="check-list"></div>
+        </section>
+
+        <footer class="panel-footer">
+          The GLB is a generated presentation artifact. The GDS remains the source of truth.
+        </footer>
+      </aside>
+    </main>
+  </body>
+</html>

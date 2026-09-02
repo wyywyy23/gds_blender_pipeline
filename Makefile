@@ -66,11 +66,18 @@ AIM_RUN_VR_MANIFEST = $(AIM_RUN_VR_DIR)/layer_manifest.vr.json
 AIM_RUN_VR_STUDENT_LEGEND = $(AIM_RUN_VR_DIR)/layer_legend.student.json
 AIM_RUN_VR_README = $(AIM_RUN_VR_DIR)/README.vr-starter.md
 
+# Short-cycle realtime presentation spike. Override these paths for another sample.
+AIM_REALTIME_BLEND ?= examples/aim/blender/ramzi.realistic.blend
+AIM_REALTIME_GLB ?= .local/runs/ramzi/realtime/ramzi.realistic.glb
+AIM_VIEWER_HOST ?= 127.0.0.1
+AIM_VIEWER_PORT ?= 8000
+
 .PHONY: \
 	env env-update env-remove env-info \
 	aim-render-layers aim-registry aim-blendergds-config \
 	aim-preprocess aim-build-scene aim-render-preset aim-prepare-render-blend \
-	aim-build aim-render aim-run aim-vr-starter aim-clean-generated
+	aim-build aim-render aim-run aim-vr-starter \
+	aim-export-glb aim-realtime-spike aim-serve-viewer aim-clean-generated
 
 aim-build:
 	@test -n "$(strip $(GDS))" || { echo "Usage: make aim-build GDS=path/to/input.gds"; exit 2; }
@@ -294,6 +301,25 @@ aim-vr-starter:
 		'6. Import. Use layer_legend.student.json for quick layer-number meaning and layer_manifest.vr.json for advanced metadata.' \
 		> "$(AIM_RUN_VR_README)"
 	@echo "VR starter package ready: $(AIM_RUN_VR_DIR)"
+
+aim-export-glb:
+	@test -n "$(strip $(AIM_REALTIME_BLEND))" || { echo "AIM_REALTIME_BLEND is required"; exit 2; }
+	@test -n "$(strip $(AIM_REALTIME_GLB))" || { echo "AIM_REALTIME_GLB is required"; exit 2; }
+	@test -f "$(AIM_REALTIME_BLEND)" || { echo "Blend file not found: $(AIM_REALTIME_BLEND)"; exit 2; }
+	mkdir -p "$(dir $(AIM_REALTIME_GLB))"
+	$(BLENDER) --background "$(AIM_REALTIME_BLEND)" \
+		--python scripts/aim_export_glb.py -- \
+		--output "$(AIM_REALTIME_GLB)"
+	@echo "GLB ready: $(AIM_REALTIME_GLB)"
+
+aim-realtime-spike: aim-export-glb
+	@echo "Serve the viewer with: make aim-serve-viewer"
+	@echo "Then open: http://$(AIM_VIEWER_HOST):$(AIM_VIEWER_PORT)/viewer/?model=/$(AIM_REALTIME_GLB)"
+
+aim-serve-viewer:
+	@test -f "$(AIM_REALTIME_GLB)" || { echo "GLB not found: $(AIM_REALTIME_GLB). Run make aim-realtime-spike first."; exit 2; }
+	@echo "Viewer: http://$(AIM_VIEWER_HOST):$(AIM_VIEWER_PORT)/viewer/?model=/$(AIM_REALTIME_GLB)"
+	python3 -m http.server "$(AIM_VIEWER_PORT)" --bind "$(AIM_VIEWER_HOST)" --directory .
 
 aim-clean-generated:
 	rm -f $(AIM_RENDER_DOPING)
