@@ -200,6 +200,23 @@ def load_preset(path: Path) -> dict[str, Any]:
     denoise = render_data.get("denoise")
     if not isinstance(denoise, bool):
         raise ValueError("render.denoise must be true or false")
+    device_value = render_data.get("device")
+    device = None if device_value is None else str(device_value).upper()
+    if device is not None and device not in {"CPU", "GPU"}:
+        raise ValueError("render.device must be CPU or GPU")
+    preview_samples = render_data.get("preview_samples")
+    if (
+        preview_samples is not None
+        and (
+            isinstance(preview_samples, bool)
+            or not isinstance(preview_samples, int)
+            or preview_samples <= 0
+        )
+    ):
+        raise ValueError("render.preview_samples must be a positive integer")
+    preview_denoise = render_data.get("preview_denoise")
+    if preview_denoise is not None and not isinstance(preview_denoise, bool):
+        raise ValueError("render.preview_denoise must be true or false")
     adaptive_sampling = render_data.get("adaptive_sampling")
     if adaptive_sampling is not None and not isinstance(adaptive_sampling, bool):
         raise ValueError("render.adaptive_sampling must be true or false")
@@ -213,8 +230,11 @@ def load_preset(path: Path) -> dict[str, Any]:
         raise ValueError("render.transparent must be true or false")
     render = {
         "engine": str(render_data.get("engine", "CYCLES")).upper(),
+        "device": device,
         "samples": samples,
         "denoise": denoise,
+        "preview_samples": preview_samples,
+        "preview_denoise": preview_denoise,
         "adaptive_sampling": adaptive_sampling,
         "file_format": file_format,
         "transparent": transparent,
@@ -432,8 +452,14 @@ def apply_color_management(
 
 def apply_render_settings(scene: Any, render_config: dict[str, Any]) -> None:
     scene.render.engine = render_config["engine"]
+    if render_config["device"] is not None:
+        scene.cycles.device = render_config["device"]
     scene.cycles.samples = render_config["samples"]
     scene.cycles.use_denoising = render_config["denoise"]
+    if render_config["preview_samples"] is not None:
+        scene.cycles.preview_samples = render_config["preview_samples"]
+    if render_config["preview_denoise"] is not None:
+        scene.cycles.use_preview_denoising = render_config["preview_denoise"]
     adaptive_sampling = render_config["adaptive_sampling"]
     if adaptive_sampling is not None:
         scene.cycles.use_adaptive_sampling = adaptive_sampling
@@ -455,8 +481,11 @@ def apply_render_settings(scene: Any, render_config: dict[str, Any]) -> None:
     scene.render.use_file_extension = True
     print(
         "Render preset: "
-        f"engine={scene.render.engine}, samples={scene.cycles.samples}, "
+        f"engine={scene.render.engine}, device={scene.cycles.device}, "
+        f"samples={scene.cycles.samples}, "
         f"denoise={scene.cycles.use_denoising}, "
+        f"preview_samples={scene.cycles.preview_samples}, "
+        f"preview_denoise={scene.cycles.use_preview_denoising}, "
         f"adaptive_sampling={scene.cycles.use_adaptive_sampling}, "
         f"format={scene.render.image_settings.file_format}"
     )

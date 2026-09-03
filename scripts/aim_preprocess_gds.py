@@ -28,17 +28,32 @@ from __future__ import annotations
 
 import argparse
 import ast
-import importlib
 from pathlib import Path
 from typing import Any
 
+import gdstk
 import gdsfactory as gf
 from gdsfactory.gpdk import get_generic_pdk
-from gdsfactory.typings import CornerMode
 from kfactory import kdb
 import yaml
 
 OFFSET_WORK_LAYER = (9000, 0)
+PRESENTATION_METAL_RENDER_LAYERS = frozenset(
+    {
+        "M1AM_RENDER",
+        "M2AM_RENDER",
+        "MLAM_RENDER",
+    }
+)
+PRESENTATION_CONTACT_VIA_RENDER_LAYERS = frozenset(
+    {
+        "CBAM_RENDER",
+        "V1AM_RENDER",
+        "VAAM_RENDER",
+    }
+)
+PRESENTATION_METAL_ROUNDING_TOLERANCE = 72
+PRESENTATION_CONTACT_VIA_ROUNDING_TOLERANCE = 32
 
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
@@ -309,19 +324,6 @@ def insert_simple_region_shapes(shapes: Any, region: kdb.Region) -> None:
             shapes.insert(piece)
 
 
-def component_from_region(
-    region: kdb.Region,
-    *,
-    layer: tuple[int, int] = OFFSET_WORK_LAYER,
-    dbu: float,
-) -> gf.Component:
-    c = gf.Component()
-    if c.kcl.dbu != dbu:
-        raise RuntimeError(f"Temporary dbu {c.kcl.dbu} does not match input dbu {dbu}")
-    add_region(c, region=region, layer=layer)
-    return c
-
-
 def count_region_polygons(region: kdb.Region) -> int:
     return sum(1 for _ in region.each())
 
@@ -409,15 +411,52 @@ def build_input_regions(
     return {name: region_for_layer(c, layer) for name, layer in input_layers.items()}
 
 
-def get_legacy_gdsfactory_offset() -> Any:
-    try:
-        geometry = importlib.import_module("gdsfactory.geometry")
-    except ModuleNotFoundError:
-        return None
-    return getattr(geometry, "offset", None)
+def gdstk_polygon_from_points(
+    points: Any, *, dbu: float
+) -> gdstk.Polygon:
+    """Convert a KLayout point iterator to a gdstk polygon in microns."""
+    return gdstk.Polygon([(point.x * dbu, point.y * dbu) for point in points])
 
 
-def offset_region_with_gdsfactory(
+def call_gdstk_offset(
+    polygons: list[gdstk.Polygon],
+    *,
+    distance: float,
+    join: str,
+    tolerance: int,
+    dbu: float,
+) -> list[gdstk.Polygon]:
+    if not polygons:
+        return []
+    return gdstk.offset(
+        polygons,
+        distance,
+        join=join,
+        tolerance=tolerance,
+        precision=dbu,
+        use_union=True,
+    )
+
+
+def region_from_gdstk_polygons(
+    polygons: list[gdstk.Polygon], *, dbu: float
+) -> kdb.Region:
+    """Snap gdstk output back to the source layout's integer DBU grid."""
+    region = kdb.Region()
+    for polygon in polygons:
+        points = [
+            kdb.Point(
+                microns_to_dbu(float(x), dbu),
+                microns_to_dbu(float(y), dbu),
+            )
+            for x, y in polygon.points
+        ]
+        if len(points) >= 3:
+            region.insert(kdb.Polygon(points))
+    return merge_region(region)
+
+
+def offset_region_with_gdstk(
     region: kdb.Region,
     *,
     distance: float,
@@ -425,38 +464,68 @@ def offset_region_with_gdsfactory(
     tolerance: int,
     dbu: float,
 ) -> kdb.Region:
-    c = component_from_region(region, dbu=dbu)
+    simple_polygons: list[gdstk.Polygon] = []
+    polygons_with_holes: list[
+        tuple[gdstk.Polygon, list[gdstk.Polygon]]
+    ] = []
 
-    legacy_offset = get_legacy_gdsfactory_offset()
-    if legacy_offset is not None:
-        c_offset = legacy_offset(
-            c,
+    for polygon in merge_region(region).each():
+        hull_points = list(polygon.each_point_hull())
+        has_repeated_hull_point = len(
+            {(point.x, point.y) for point in hull_points}
+        ) != len(hull_points)
+        if has_repeated_hull_point:
+            for piece in polygon.decompose_trapezoids():
+                simple_polygons.append(
+                    gdstk_polygon_from_points(piece.each_point(), dbu=dbu)
+                )
+            continue
+
+        outer = gdstk_polygon_from_points(hull_points, dbu=dbu)
+        holes = [
+            gdstk_polygon_from_points(
+                polygon.each_point_hole(hole_index), dbu=dbu
+            )
+            for hole_index in range(polygon.holes())
+        ]
+        if holes:
+            polygons_with_holes.append((outer, holes))
+        else:
+            simple_polygons.append(outer)
+
+    offset_polygons = call_gdstk_offset(
+        simple_polygons,
+        distance=distance,
+        join=join,
+        tolerance=tolerance,
+        dbu=dbu,
+    )
+    for outer, holes in polygons_with_holes:
+        outer_offset = call_gdstk_offset(
+            [outer],
             distance=distance,
             join=join,
             tolerance=tolerance,
-            layer=OFFSET_WORK_LAYER,
+            dbu=dbu,
         )
-        return region_for_layer(c_offset, OFFSET_WORK_LAYER)
+        hole_offset = call_gdstk_offset(
+            holes,
+            distance=-distance,
+            join=join,
+            tolerance=tolerance,
+            dbu=dbu,
+        )
+        if outer_offset:
+            offset_polygons.extend(
+                gdstk.boolean(
+                    outer_offset,
+                    hole_offset,
+                    "not",
+                    precision=dbu,
+                )
+            )
 
-    corner_mode_by_join = {
-        "miter": CornerMode.square_limit,
-        "bevel": CornerMode.octagon_limit,
-        "round": CornerMode.square_limit,
-    }
-    c.offset(
-        layer=OFFSET_WORK_LAYER,
-        distance=distance,
-        flatten=True,
-        corner_mode=corner_mode_by_join[join],
-    )
-    out = region_for_layer(c, OFFSET_WORK_LAYER)
-
-    if join == "round" and not out.is_empty():
-        radius = abs(microns_to_dbu(distance, dbu))
-        if radius > 0:
-            out = merge_region(out.rounded_corners(radius, radius, tolerance))
-
-    return out
+    return region_from_gdstk_polygons(offset_polygons, dbu=dbu)
 
 
 def apply_region_offset(
@@ -489,13 +558,13 @@ def apply_region_offset(
         )
 
     tolerance = operation.get("tolerance", 64)
-    if not isinstance(tolerance, int):
+    if not isinstance(tolerance, int) or tolerance < 2:
         raise ValueError(
-            f"derived_regions.{region_name} offset tolerance must be an integer"
+            f"derived_regions.{region_name} offset tolerance must be an integer >= 2"
         )
 
     return merge_region(
-        offset_region_with_gdsfactory(
+        offset_region_with_gdstk(
             region,
             distance=float(distance),
             join=join,
@@ -503,6 +572,100 @@ def apply_region_offset(
             dbu=dbu,
         )
     )
+
+
+def region_topology(region: kdb.Region) -> tuple[int, int]:
+    polygons = list(region.each())
+    return len(polygons), sum(polygon.holes() for polygon in polygons)
+
+
+def round_xy_region_preserving_topology(
+    region: kdb.Region,
+    *,
+    radius_um: float,
+    dbu: float,
+    region_name: str,
+    tolerance: int = PRESENTATION_METAL_ROUNDING_TOLERANCE,
+) -> tuple[kdb.Region, dict[str, int]]:
+    """Round a 2D region with TUAM's net-zero offset chain.
+
+    The final topology must match the source. Intermediate erosion can split a
+    narrow neck temporarily, so the guard compares the fully reconstructed
+    contour after ``-radius, +2*radius, -radius``.
+    """
+    if radius_um < 0:
+        raise ValueError("XY rounding radius must be zero or greater")
+    if tolerance <= 0:
+        raise ValueError("XY rounding tolerance must be greater than zero")
+
+    source = merge_region(region.dup())
+    components_before, holes_before = region_topology(source)
+    area_before = source.area()
+    if radius_um == 0 or source.is_empty():
+        return source, {
+            "components_before": components_before,
+            "components_after": components_before,
+            "holes_before": holes_before,
+            "holes_after": holes_before,
+            "area_before_dbu2": area_before,
+            "area_after_dbu2": area_before,
+        }
+    if microns_to_dbu(radius_um, dbu) <= 0:
+        raise ValueError(
+            f"{region_name} XY rounding radius {radius_um} um is below one DBU"
+        )
+
+    rounded = source
+    for distance in (-radius_um, 2.0 * radius_um, -radius_um):
+        if rounded.is_empty():
+            break
+        rounded = apply_region_offset(
+            rounded,
+            operation={
+                "type": "offset",
+                "distance": distance,
+                "join": "round",
+                "tolerance": tolerance,
+            },
+            dbu=dbu,
+            region_name=region_name,
+        )
+
+    rounded = merge_region(rounded)
+    components_after, holes_after = region_topology(rounded)
+    if (components_after, holes_after) != (components_before, holes_before):
+        raise ValueError(
+            f"{region_name} XY rounding changed topology: "
+            f"components {components_before}->{components_after}, "
+            f"holes {holes_before}->{holes_after}"
+        )
+
+    return rounded, {
+        "components_before": components_before,
+        "components_after": components_after,
+        "holes_before": holes_before,
+        "holes_after": holes_after,
+        "area_before_dbu2": area_before,
+        "area_after_dbu2": rounded.area(),
+    }
+
+
+def presentation_xy_fillet_radius_for_layer(
+    layer_name: str,
+    *,
+    metal_radius_um: float,
+    contact_via_radius_um: float,
+) -> float:
+    """Return the independently configured visual-GDS XY radius for a layer."""
+    if metal_radius_um < 0:
+        raise ValueError("Metal XY rounding radius must be zero or greater")
+    if contact_via_radius_um < 0:
+        raise ValueError("Contact/via XY rounding radius must be zero or greater")
+    if layer_name in PRESENTATION_METAL_RENDER_LAYERS:
+        return metal_radius_um
+    if layer_name in PRESENTATION_CONTACT_VIA_RENDER_LAYERS:
+        return contact_via_radius_um
+    return 0.0
 
 
 def build_derived_regions(
@@ -895,11 +1058,14 @@ def add_static_expression_render_layers(
     region_symbols: dict[str, kdb.Region],
     handled_layers: set[str],
     min_export_z: float | None,
-) -> dict[str, int]:
+    presentation_metal_xy_fillet_width_um: float,
+    presentation_contact_via_xy_fillet_width_um: float,
+) -> dict[str, Any]:
     stats = {
         "candidate": 0,
         "nonempty": 0,
         "empty": 0,
+        "presentation_xy_rounding": {},
     }
 
     for name, spec in render_layers.items():
@@ -920,6 +1086,27 @@ def add_static_expression_render_layers(
 
         stats["candidate"] += 1
         region = evaluate_region_expression(expression, region_symbols)
+        fillet_radius_um = presentation_xy_fillet_radius_for_layer(
+            name,
+            metal_radius_um=presentation_metal_xy_fillet_width_um,
+            contact_via_radius_um=presentation_contact_via_xy_fillet_width_um,
+        )
+        if fillet_radius_um > 0:
+            fillet_tolerance = (
+                PRESENTATION_CONTACT_VIA_ROUNDING_TOLERANCE
+                if name in PRESENTATION_CONTACT_VIA_RENDER_LAYERS
+                else PRESENTATION_METAL_ROUNDING_TOLERANCE
+            )
+            region, rounding_stats = round_xy_region_preserving_topology(
+                region,
+                radius_um=fillet_radius_um,
+                dbu=c_out.kcl.dbu,
+                region_name=name,
+                tolerance=fillet_tolerance,
+            )
+            rounding_stats["radius_um"] = fillet_radius_um
+            rounding_stats["tolerance"] = fillet_tolerance
+            stats["presentation_xy_rounding"][name] = rounding_stats
         if region.is_empty():
             stats["empty"] += 1
             continue
@@ -939,6 +1126,8 @@ def preprocess_aim_gds(
     max_polygon_vertices: int | None = None,
     include_undercut: bool = True,
     include_passivation_opening: bool = True,
+    presentation_metal_xy_fillet_width_um: float = 0.0,
+    presentation_contact_via_xy_fillet_width_um: float = 0.0,
     min_export_z: float | None = None,
     show: bool = False,
 ) -> gf.Component:
@@ -1115,6 +1304,10 @@ def preprocess_aim_gds(
             "CLADDING_PASSIVATION_CUTTER_RENDER",
         },
         min_export_z=min_export_z,
+        presentation_metal_xy_fillet_width_um=presentation_metal_xy_fillet_width_um,
+        presentation_contact_via_xy_fillet_width_um=(
+            presentation_contact_via_xy_fillet_width_um
+        ),
     )
 
     fracture_stats = None
@@ -1187,6 +1380,26 @@ def preprocess_aim_gds(
         f"{static_expression_stats['empty']} empty, "
         f"{static_expression_stats['candidate']} total"
     )
+    print(
+        "Visual-GDS XY fillet radii: "
+        f"M1/M2/ML={presentation_metal_xy_fillet_width_um:.3f} um, "
+        f"CBAM/V1/VA={presentation_contact_via_xy_fillet_width_um:.3f} um"
+    )
+    for name, rounding_stats in sorted(
+        static_expression_stats["presentation_xy_rounding"].items()
+    ):
+        area_delta = (
+            rounding_stats["area_after_dbu2"]
+            - rounding_stats["area_before_dbu2"]
+        )
+        print(
+            f"  {name}: radius={rounding_stats['radius_um']:.3f} um, "
+            f"round_tolerance={rounding_stats['tolerance']}, components="
+            f"{rounding_stats['components_before']}->"
+            f"{rounding_stats['components_after']}, holes="
+            f"{rounding_stats['holes_before']}->"
+            f"{rounding_stats['holes_after']}, area_delta_dbu2={area_delta}"
+        )
     if fracture_stats is not None:
         print(
             "Fractured output polygons: "
@@ -1220,6 +1433,26 @@ def main() -> None:
         help=(
             "Fracture output polygons to at most this many vertices before "
             "writing GDS"
+        ),
+    )
+    parser.add_argument(
+        "--presentation-metal-xy-fillet-width-um",
+        type=float,
+        default=0.0,
+        help=(
+            "Round only M1AM, M2AM, and MLAM visual-GDS XY contours with "
+            "the TUAM-style net-zero offset chain; zero disables "
+            "(default: 0)"
+        ),
+    )
+    parser.add_argument(
+        "--presentation-contact-via-xy-fillet-width-um",
+        type=float,
+        default=0.0,
+        help=(
+            "Round only CBAM, V1AM, and VAAM visual-GDS XY contours with "
+            "the guarded net-zero gdstk offset chain; zero disables "
+            "(default: 0)"
         ),
     )
     parser.add_argument(
@@ -1260,6 +1493,12 @@ def main() -> None:
         max_polygon_vertices=args.max_polygon_vertices,
         include_undercut=args.undercut,
         include_passivation_opening=args.passivation_opening,
+        presentation_metal_xy_fillet_width_um=(
+            args.presentation_metal_xy_fillet_width_um
+        ),
+        presentation_contact_via_xy_fillet_width_um=(
+            args.presentation_contact_via_xy_fillet_width_um
+        ),
         min_export_z=args.min_export_z,
         show=args.show,
     )

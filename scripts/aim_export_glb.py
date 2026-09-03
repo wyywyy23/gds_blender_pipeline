@@ -84,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         export_cameras=False,
         export_lights=False,
         export_extras=True,
+        export_apply=True,
         export_yup=True,
         use_renderable=True,
         use_visible=False,

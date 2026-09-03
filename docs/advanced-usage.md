@@ -106,7 +106,9 @@ conda run -n gds-blender-pipeline python scripts/aim_preprocess_gds.py \
   --input path/to/my_cell.gds \
   --registry configs/aim/layer_registry.local.yaml \
   --output .local/work/my_cell.visual.gds \
-  --max-polygon-vertices 256
+  --max-polygon-vertices 256 \
+  --presentation-metal-xy-fillet-width-um 0.20 \
+  --presentation-contact-via-xy-fillet-width-um 0.10
 ```
 
 Direct flags:
@@ -117,8 +119,25 @@ Direct flags:
 - `--min-export-z <z>`: export only render layers with configured `zmin >= z`
   (for example `0.0` to exclude below-zero layers). `CLADDING_RENDER` is kept
   by default even when its `zmin` is slightly below the threshold.
+- `--presentation-metal-xy-fillet-width-um <radius>`: round only the
+  `M1AM_RENDER`, `M2AM_RENDER`, and `MLAM_RENDER` XY contours before writing
+  visual GDS. The preprocessor applies the TUAM-style net-zero round-offset
+  chain `-radius`, `+2*radius`, `-radius` and refuses a result that changes the
+  final connected-component or hole count.
+- `--presentation-contact-via-xy-fillet-width-um <radius>`: apply the same
+  guarded round-offset chain independently to `CBAM_RENDER`, `V1AM_RENDER`,
+  and `VAAM_RENDER`. This permits a smaller contact/via radius without
+  changing the M1/M2/ML radius. Contact/via arcs use 32 points per full
+  circle instead of the metal group's 72, avoiding excessive tessellation of
+  large via arrays while retaining eight segments per 90-degree corner.
 
 DIAM processing remains enabled in all four TUAM/PAAM combinations.
+Presentation XY rounding does not modify the raw GDS, silicon bodies, doping
+markers, nitride, cladding, or cutter geometry. Because the rounded contours
+are stored in visual GDS, Blender and GLB use the same XY geometry. The Make
+workflow enables a `0.20` um M1/M2/ML radius and an independent `0.10` um
+CBAM/V1/VA radius by default; pass the corresponding variable as `0` to
+disable either group.
 
 ## VR Starter Package
 
@@ -213,11 +232,20 @@ blender --background --python scripts/aim_build_blender_scene.py -- \
   --stack-config configs/blender/aim.yaml \
   --color-config configs/blender/colors/aim/realistic.yaml \
   --output .local/work/my_cell.realistic.blend \
+  --presentation-metal-z-bevel-width-um 0.10 \
+  --presentation-metal-bevel-segments 8 \
   --no-merge-layers
 ```
 
 The builder applies materials, handles cladding, fits the camera, removes
-PN-conflict debug objects, and saves the scene.
+PN-conflict debug objects, and saves the scene. Metal XY rounding belongs to the
+visual-GDS preprocessing stage above; the builder does not alter XY geometry.
+The optional z-profile treatment applies only to `M1AM_RENDER`, `M2AM_RENDER`,
+and `MLAM_RENDER`; cladding, silicon/doping, nitride, contact, and via layers are
+excluded. It uses an eight-sample Cycles bevel shader so highly tessellated
+metal rims do not expand into impractically large meshes. GLB retains the
+visual-GDS XY geometry; the Cycles-only z-profile treatment must be approximated
+by the target realtime renderer.
 
 ## Render Presets
 
@@ -240,6 +268,9 @@ color_management:
 
 render:
   engine: CYCLES
+  device: GPU
+  preview_samples: 64
+  preview_denoise: true
   samples: 1024
   denoise: false
   adaptive_sampling: false
@@ -254,7 +285,10 @@ runs:
 
 Layer names accept short forms such as `cladding` or `cbam`. The renderer
 normalizes them to render-layer object names. Resolution is read from the
-source scene. CPU/GPU selection remains machine-specific.
+source scene. `preview_samples` and `preview_denoise` affect the interactive
+Cycles viewport only; final output still uses `samples` and `denoise`.
+`device: GPU` asks Cycles to use a GPU, while the concrete backend (Metal on
+Apple silicon) and enabled GPU remain machine-specific Blender preferences.
 
 ### Render With Make
 
@@ -496,10 +530,14 @@ Color keys must match layer names in `configs/blender/aim.yaml`.
 | `AIM_BLEND`                                   | empty                                       | Base scene output; color name is inserted                |
 | `AIM_BLENDER_COLORS`                          | `configs/blender/colors/aim/realistic.yaml` | One or more color files                                  |
 | `AIM_PREPROCESS_MAX_POLYGON_VERTICES`         | `256`                                       | Polygon fracture limit                                   |
+| `AIM_PREPROCESS_METAL_XY_FILLET_WIDTH_UM`     | `0.20`                                      | Visual-GDS M1/M2/ML XY fillet radius in micrometers      |
+| `AIM_PREPROCESS_CONTACT_VIA_XY_FILLET_WIDTH_UM` | `0.10`                                    | Visual-GDS CBAM/V1/VA XY fillet radius in micrometers    |
 | `AIM_PREPROCESS_UNDERCUT`                     | `1`                                         | Apply TUAM substrate etch and export its cladding cutter |
 | `AIM_PREPROCESS_PASSIVATION_OPENING`          | `1`                                         | Export the PAAM passivation cutter                       |
 | `AIM_BLENDER_Z_SCALE`                         | `1.0`                                       | Vertical scale                                           |
 | `AIM_BLENDER_CAMERA_FIT_MARGIN`               | `1.10`                                      | Camera-fit margin                                        |
+| `AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_WIDTH_UM`   | `0`                                  | Cycles metal z-profile bevel radius in micrometers        |
+| `AIM_BLENDER_PRESENTATION_METAL_BEVEL_SEGMENTS`     | `8`                                  | Cycles metal bevel-shader samples                         |
 | `AIM_BLENDER_CLADDING_MODE`                   | `boolean`                                   | `boolean`, `solid`, or `omit`                            |
 | `AIM_BLENDER_CLADDING_BOOLEAN_SOLVER`         | `manifold`                                  | `manifold` or `exact`                                    |
 | `AIM_BLENDER_CLADDING_UNDERCUT_METHOD`        | `fractured_batches`                         | Undercut construction method                             |

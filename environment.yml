@@ -10,5 +10,6 @@ dependencies:
   - make
   - pyyaml
   - pip:
+      - gdstk==1.0.1
       - gdsfactory
       - shapely>=2.1

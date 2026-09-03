@@ -49,10 +49,32 @@ CLADDING_UNDERCUT_METHODS = (
 )
 CLADDING_UNFRACTURED_CUTTER_FORMAT_VERSION = 1
 CLADDING_TILED_EXPLICIT_MESH_FORMAT_VERSION = 1
+PRESENTATION_METAL_LAYERS = frozenset(
+    {
+        "M1AM_RENDER",
+        "M2AM_RENDER",
+        "MLAM_RENDER",
+    }
+)
+PRESENTATION_Z_BEVEL_NODE = "AIM_Presentation_Z_Bevel"
 
 
 def positive_float(value: str) -> float:
     number = float(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return number
+
+
+def nonnegative_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number) or number < 0:
+        raise argparse.ArgumentTypeError("must be zero or greater")
+    return number
+
+
+def positive_int(value: str) -> int:
+    number = int(value)
     if number <= 0:
         raise argparse.ArgumentTypeError("must be greater than zero")
     return number
@@ -149,6 +171,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Camera framing multiplier applied around the imported chip "
             "bounding box (default: 1.10)"
+        ),
+    )
+    parser.add_argument(
+        "--presentation-metal-z-bevel-width-um",
+        type=nonnegative_float,
+        default=0.0,
+        help=(
+            "Optional Cycles bevel-shader radius in micrometers for M1AM, "
+            "M2AM, and MLAM edge highlights (default: 0, disabled)"
+        ),
+    )
+    parser.add_argument(
+        "--presentation-metal-bevel-segments",
+        type=positive_int,
+        default=8,
+        help=(
+            "Samples for the Cycles metal z-profile bevel shader "
+            "(default: 8)"
         ),
     )
     parser.add_argument(
@@ -708,6 +748,66 @@ def layer_datablock_name_map(layer_names: list[str]) -> dict[str, str]:
         out[f"L{layer_name}"] = layer_name
         out[f"Mat_{layer_name}"] = layer_name
     return out
+
+
+def apply_presentation_metal_z_bevel_shaders(
+    bpy: Any,
+    *,
+    width_um: float,
+    samples: int,
+) -> int:
+    """Add an efficient Cycles normal bevel without tessellating every rim."""
+    scene = bpy.context.scene
+    scene["aim_presentation_metal_z_bevel_width_um"] = width_um
+    scene["aim_presentation_metal_layers"] = sorted(PRESENTATION_METAL_LAYERS)
+    scene["aim_presentation_metal_z_bevel_samples"] = samples
+    if width_um == 0:
+        print("Presentation metal z-profile bevel shader: disabled")
+        return 0
+
+    updated = 0
+    for layer_name in sorted(PRESENTATION_METAL_LAYERS):
+        material = bpy.data.materials.get(f"Mat_{layer_name}")
+        if material is None:
+            continue
+
+        material.use_nodes = True
+        node_tree = material.node_tree
+        bsdf = node_tree.nodes.get("Principled BSDF")
+        if bsdf is None or "Normal" not in bsdf.inputs:
+            print(f"Material {material.name} has no Principled BSDF Normal input")
+            continue
+
+        bevel = node_tree.nodes.get(PRESENTATION_Z_BEVEL_NODE)
+        if bevel is None:
+            bevel = node_tree.nodes.new("ShaderNodeBevel")
+            bevel.name = PRESENTATION_Z_BEVEL_NODE
+            bevel.label = "Presentation metal z-profile bevel"
+        bevel.samples = samples
+        bevel.inputs["Radius"].default_value = width_um
+        bevel.location = (bsdf.location.x - 220.0, bsdf.location.y - 180.0)
+
+        normal_input = bsdf.inputs["Normal"]
+        existing_links = list(normal_input.links)
+        if existing_links and existing_links[0].from_node is not bevel:
+            source_socket = existing_links[0].from_socket
+            for link in list(bevel.inputs["Normal"].links):
+                node_tree.links.remove(link)
+            node_tree.links.new(source_socket, bevel.inputs["Normal"])
+        for link in existing_links:
+            node_tree.links.remove(link)
+        node_tree.links.new(bevel.outputs["Normal"], normal_input)
+
+        material["aim_presentation_metal_z_bevel_width_um"] = width_um
+        material["aim_presentation_metal_z_bevel_samples"] = samples
+        updated += 1
+
+    if updated == 0:
+        raise RuntimeError(
+            "Presentation metal z-profile bevel was requested but no "
+            "configured metal materials were found"
+        )
+    return updated
 
 
 def remove_orphan_layer_datablocks(
@@ -2108,6 +2208,19 @@ def build_scene(args: argparse.Namespace) -> None:
     if not args.no_apply_colors:
         updated = apply_color_schema(bpy, args.color_config)
         print(f"Updated {updated} materials from AIM color schema")
+
+    shaded_materials = apply_presentation_metal_z_bevel_shaders(
+        bpy,
+        width_um=args.presentation_metal_z_bevel_width_um,
+        samples=args.presentation_metal_bevel_segments,
+    )
+    if shaded_materials:
+        print(
+            "Presentation metal z-profile bevel shader: "
+            f"materials={shaded_materials}, "
+            f"width_um={args.presentation_metal_z_bevel_width_um}, "
+            f"samples={args.presentation_metal_bevel_segments}"
+        )
 
     if not args.no_fit_camera:
         fitted = fit_camera_to_imported_layers(

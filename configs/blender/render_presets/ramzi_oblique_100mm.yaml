@@ -25,6 +25,9 @@ color_management:
 
 render:
   engine: CYCLES
+  device: GPU
+  preview_samples: 64
+  preview_denoise: true
   samples: 1024
   denoise: false
   # Disable adaptive early termination so every pixel uses the requested count.
