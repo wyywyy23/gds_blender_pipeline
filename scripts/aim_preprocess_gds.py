@@ -56,6 +56,18 @@ PRESENTATION_METAL_ROUNDING_TOLERANCE = 72
 PRESENTATION_CONTACT_VIA_ROUNDING_TOLERANCE = 32
 
 
+def optional_max_polygon_vertices(value: str) -> int | None:
+    """Parse a fracture limit, using zero as an explicit disabled value."""
+    number = int(value)
+    if number == 0:
+        return None
+    if number < 4:
+        raise argparse.ArgumentTypeError(
+            "must be zero (disabled) or at least four"
+        )
+    return number
+
+
 def load_yaml(path: str | Path) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
@@ -1428,11 +1440,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--max-polygon-vertices",
-        type=int,
+        type=optional_max_polygon_vertices,
         default=None,
         help=(
             "Fracture output polygons to at most this many vertices before "
-            "writing GDS"
+            "writing GDS; zero disables fracture (default: disabled when the "
+            "script is called directly)"
         ),
     )
     parser.add_argument(

@@ -19,8 +19,15 @@ AIM_BLENDER_Z_SCALE ?= 1.0
 AIM_BLENDER_CAMERA_FIT_MARGIN ?= 1.10
 AIM_PREPROCESS_METAL_XY_FILLET_WIDTH_UM ?= 0.20
 AIM_PREPROCESS_CONTACT_VIA_XY_FILLET_WIDTH_UM ?= 0.10
-AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_WIDTH_UM ?= 0
+AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED ?= 1
+AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_WIDTH_UM ?= 0.05
 AIM_BLENDER_PRESENTATION_METAL_BEVEL_SEGMENTS ?= 8
+AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_LAYERS ?= M1AM_RENDER M2AM_RENDER MLAM_RENDER
+AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECAR_DIR ?= $(dir $(AIM_BLEND))metal-z-bevel-sidecars
+AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECARS ?=
+AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_AUTO_SIDECARS = $(foreach layer,$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_LAYERS),$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECAR_DIR)/$(layer).unfractured-layer.npz)
+AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ACTIVE_SIDECARS = $(if $(filter 1 true yes,$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED)),$(if $(strip $(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECARS)),$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECARS),$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_AUTO_SIDECARS)))
+AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ACTIVE_WIDTH_UM = $(if $(filter 1 true yes,$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED)),$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_WIDTH_UM),0)
 AIM_BLENDER_CLADDING_MODE ?= boolean
 AIM_BLENDER_CLADDING_BOOLEAN_SOLVER ?= manifold
 AIM_BLENDER_CLADDING_UNDERCUT_METHOD ?= fractured_batches
@@ -89,6 +96,7 @@ aim-build:
 	@test -f "$(AIM_RUN_SCHEME_CONFIG)" || { echo "Color scheme not found: $(AIM_RUN_SCHEME_CONFIG)"; exit 2; }
 	@case "$(UNDERCUT)" in 1|true|yes|0|false|no) ;; *) echo "UNDERCUT must be 0 or 1"; exit 2;; esac
 	@case "$(PASSIVATION_OPENING)" in 1|true|yes|0|false|no) ;; *) echo "PASSIVATION_OPENING must be 0 or 1"; exit 2;; esac
+	@case "$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED)" in 1|true|yes|0|false|no) ;; *) echo "AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED must be 0 or 1"; exit 2;; esac
 	@echo "Building $(SCHEME)-color Blender scene from $(GDS)"
 	+$(MAKE) aim-build-scene \
 		AIM_GDS="$(GDS)" \
@@ -103,6 +111,11 @@ aim-build:
 		AIM_PREPROCESS_MIN_Z="$(AIM_PREPROCESS_MIN_Z)" \
 		AIM_BLENDER_Z_SCALE="$(AIM_BLENDER_Z_SCALE)" \
 		AIM_BLENDER_CAMERA_FIT_MARGIN="$(AIM_BLENDER_CAMERA_FIT_MARGIN)" \
+		AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED="$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED)" \
+		AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_WIDTH_UM="$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_WIDTH_UM)" \
+		AIM_BLENDER_PRESENTATION_METAL_BEVEL_SEGMENTS="$(AIM_BLENDER_PRESENTATION_METAL_BEVEL_SEGMENTS)" \
+		AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_LAYERS="$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_LAYERS)" \
+		AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECARS="$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECARS)" \
 		AIM_BLENDER_CLADDING_MODE="$(AIM_BLENDER_CLADDING_MODE)" \
 		AIM_BLENDER_CLADDING_BOOLEAN_SOLVER="$(AIM_BLENDER_CLADDING_BOOLEAN_SOLVER)" \
 		AIM_BLENDER_CLADDING_UNDERCUT_METHOD="$(AIM_BLENDER_CLADDING_UNDERCUT_METHOD)" \
@@ -200,7 +213,7 @@ aim-preprocess:
 		--output "$(AIM_VISUAL_GDS)" \
 		--presentation-metal-xy-fillet-width-um "$(AIM_PREPROCESS_METAL_XY_FILLET_WIDTH_UM)" \
 		--presentation-contact-via-xy-fillet-width-um "$(AIM_PREPROCESS_CONTACT_VIA_XY_FILLET_WIDTH_UM)" \
-		--max-polygon-vertices "$(AIM_PREPROCESS_MAX_POLYGON_VERTICES)" \
+		$(if $(filter-out 0,$(strip $(AIM_PREPROCESS_MAX_POLYGON_VERTICES))),--max-polygon-vertices "$(AIM_PREPROCESS_MAX_POLYGON_VERTICES)") \
 		$(if $(strip $(AIM_PREPROCESS_MIN_Z)),--min-export-z "$(AIM_PREPROCESS_MIN_Z)") \
 		$(if $(filter 0 false no,$(AIM_PREPROCESS_UNDERCUT)),--no-undercut) \
 		$(if $(filter 0 false no,$(AIM_PREPROCESS_PASSIVATION_OPENING)),--no-passivation-opening)
@@ -209,6 +222,8 @@ aim-build-scene:
 	@test -n "$(strip $(AIM_GDS))" || { echo "AIM_GDS is required"; exit 2; }
 	@test -n "$(strip $(AIM_VISUAL_GDS))" || { echo "AIM_VISUAL_GDS is required"; exit 2; }
 	@test -n "$(strip $(AIM_BLEND))" || { echo "AIM_BLEND is required"; exit 2; }
+	@case "$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED)" in 1|true|yes|0|false|no) ;; *) echo "AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED must be 0 or 1"; exit 2;; esac
+	@if [ -n "$(filter 1 true yes,$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED))" ] && [ -z "$(strip $(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_LAYERS)$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECARS))" ]; then echo "Enabled metal Z bevel requires layers or explicit sidecars"; exit 2; fi
 	@if [ -z "$(AIM_BLENDER_COLORS)" ]; then \
 		echo "No AIM color schemes found in $(AIM_BLENDER_COLOR_DIR)"; \
 		exit 1; \
@@ -221,10 +236,24 @@ aim-build-scene:
 		AIM_VISUAL_GDS="$(AIM_VISUAL_GDS)" \
 		AIM_PREPROCESS_METAL_XY_FILLET_WIDTH_UM="$(AIM_PREPROCESS_METAL_XY_FILLET_WIDTH_UM)" \
 		AIM_PREPROCESS_CONTACT_VIA_XY_FILLET_WIDTH_UM="$(AIM_PREPROCESS_CONTACT_VIA_XY_FILLET_WIDTH_UM)" \
+		AIM_PREPROCESS_MAX_POLYGON_VERTICES="$(AIM_PREPROCESS_MAX_POLYGON_VERTICES)" \
 		AIM_PREPROCESS_UNDERCUT="$(AIM_PREPROCESS_UNDERCUT)" \
 		AIM_PREPROCESS_PASSIVATION_OPENING="$(AIM_PREPROCESS_PASSIVATION_OPENING)" \
 		AIM_PREPROCESS_MIN_Z="$(AIM_PREPROCESS_MIN_Z)"
 	mkdir -p "$(dir $(AIM_BLEND))"
+	@if [ -n "$(filter 1 true yes,$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED))" ] && [ -z "$(strip $(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECARS))" ]; then \
+		sidecar_dir="$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECAR_DIR)"; \
+		mkdir -p "$$sidecar_dir"; \
+		for layer in $(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_LAYERS); do \
+			sidecar="$$sidecar_dir/$${layer}.unfractured-layer.npz"; \
+			echo "Generating unfractured $$layer sidecar -> $$sidecar"; \
+			conda run -n $(ENV_NAME) python scripts/aim_generate_unfractured_layer_mesh.py \
+				--gds "$(AIM_VISUAL_GDS)" \
+				--stack-config "$(AIM_BLENDERGDS_CONFIG)" \
+				--layer-name "$$layer" \
+				--output "$$sidecar" || exit $$?; \
+		done; \
+	fi
 	@blend_dir=$$(dirname "$(AIM_BLEND)"); \
 	blend_stem=$$(basename "$(AIM_BLEND)" .blend); \
 	for color_config in $(AIM_BLENDER_COLORS); do \
@@ -238,8 +267,10 @@ aim-build-scene:
 			--output "$$output" \
 			--z-scale $(AIM_BLENDER_Z_SCALE) \
 			--camera-fit-margin $(AIM_BLENDER_CAMERA_FIT_MARGIN) \
-			--presentation-metal-z-bevel-width-um $(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_WIDTH_UM) \
+			--source-max-polygon-vertices $(AIM_PREPROCESS_MAX_POLYGON_VERTICES) \
+			--presentation-metal-z-bevel-width-um $(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ACTIVE_WIDTH_UM) \
 			--presentation-metal-bevel-segments $(AIM_BLENDER_PRESENTATION_METAL_BEVEL_SEGMENTS) \
+			$(foreach sidecar,$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ACTIVE_SIDECARS),--presentation-metal-z-bevel-sidecar "$(sidecar)") \
 			--cladding-mode $(AIM_BLENDER_CLADDING_MODE) \
 			--cladding-boolean-solver $(AIM_BLENDER_CLADDING_BOOLEAN_SOLVER) \
 			--cladding-undercut-method $(AIM_BLENDER_CLADDING_UNDERCUT_METHOD) \

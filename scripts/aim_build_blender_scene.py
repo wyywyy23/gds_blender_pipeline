@@ -49,6 +49,7 @@ CLADDING_UNDERCUT_METHODS = (
 )
 CLADDING_UNFRACTURED_CUTTER_FORMAT_VERSION = 1
 CLADDING_TILED_EXPLICIT_MESH_FORMAT_VERSION = 1
+PRESENTATION_UNFRACTURED_LAYER_FORMAT_VERSION = 1
 PRESENTATION_METAL_LAYERS = frozenset(
     {
         "M1AM_RENDER",
@@ -77,6 +78,13 @@ def positive_int(value: str) -> int:
     number = int(value)
     if number <= 0:
         raise argparse.ArgumentTypeError("must be greater than zero")
+    return number
+
+
+def nonnegative_int(value: str) -> int:
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be zero or greater")
     return number
 
 
@@ -174,6 +182,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--source-max-polygon-vertices",
+        type=nonnegative_int,
+        default=None,
+        help=(
+            "Fracture limit used to create the visual GDS. Zero means "
+            "unfractured. Make passes this value so shader Z bevel can "
+            "refuse fractured inputs."
+        ),
+    )
+    parser.add_argument(
         "--presentation-metal-z-bevel-width-um",
         type=nonnegative_float,
         default=0.0,
@@ -189,6 +207,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "Samples for the Cycles metal z-profile bevel shader "
             "(default: 8)"
+        ),
+    )
+    parser.add_argument(
+        "--presentation-metal-z-bevel-sidecar",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "Validated unfractured-layer .npz sidecar. Repeat for each metal "
+            "layer that should receive a Cycles Z-rim treatment. The sidecar "
+            "replaces fractured geometry, keeps sidewall faces flat, applies "
+            "the bevel node only to planar caps, and limits the sidewall normal "
+            "transition to height-only bands at the top and bottom."
         ),
     )
     parser.add_argument(
@@ -394,6 +425,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "--cladding-explicit-chunk-size-um requires "
             "--cladding-undercut-method tiled_explicit_mesh"
         )
+    if (
+        args.presentation_metal_z_bevel_sidecar
+        and args.presentation_metal_z_bevel_width_um == 0
+    ):
+        parser.error(
+            "--presentation-metal-z-bevel-sidecar requires a positive "
+            "--presentation-metal-z-bevel-width-um"
+        )
+    if (
+        args.presentation_metal_z_bevel_width_um > 0
+        and not args.presentation_metal_z_bevel_sidecar
+        and args.source_max_polygon_vertices not in {None, 0}
+    ):
+        parser.error(
+            "Cycles shader Z bevel requires an unfractured visual GDS; set "
+            "--source-max-polygon-vertices 0 or provide an unfractured-layer "
+            "sidecar"
+        )
 
     args.gds = args.gds.resolve()
     args.stack_config = args.stack_config.resolve()
@@ -404,6 +453,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         )
     if args.cladding_explicit_mesh is not None:
         args.cladding_explicit_mesh = args.cladding_explicit_mesh.resolve()
+    args.presentation_metal_z_bevel_sidecar = [
+        path.resolve() for path in args.presentation_metal_z_bevel_sidecar
+    ]
     args.output = (
         default_output_blend(args.gds).resolve()
         if args.output is None
@@ -989,6 +1041,298 @@ def load_unfractured_cutter_sidecar(path: Path) -> dict[str, Any]:
         "dbu_um": dbu_um,
         "component_count": component_count,
     }
+
+
+def load_unfractured_layer_sidecar(path: Path) -> dict[str, Any]:
+    import numpy as np
+
+    required = {
+        "format_version",
+        "layer_name",
+        "gds_layer",
+        "xy_dbu",
+        "triangles",
+        "boundary_edges",
+        "component_triangle_offsets",
+        "dbu_um",
+        "logical_component_count",
+        "validated_closed_planar_topology",
+    }
+    with np.load(path, allow_pickle=False) as archive:
+        missing = required - set(archive.files)
+        if missing:
+            raise ValueError(
+                f"Unfractured layer sidecar is missing: {sorted(missing)}"
+            )
+        data = {name: archive[name].copy() for name in required}
+
+    def scalar(name: str) -> Any:
+        values = data[name].reshape(-1)
+        if len(values) != 1:
+            raise ValueError(f"Sidecar {name} must contain one value")
+        return values[0]
+
+    version = int(scalar("format_version"))
+    if version != PRESENTATION_UNFRACTURED_LAYER_FORMAT_VERSION:
+        raise ValueError(
+            f"Unsupported unfractured layer format {version}; expected "
+            f"{PRESENTATION_UNFRACTURED_LAYER_FORMAT_VERSION}"
+        )
+    if int(scalar("validated_closed_planar_topology")) != 1:
+        raise ValueError("Unfractured layer sidecar is not topology-validated")
+
+    layer_name = str(scalar("layer_name"))
+    if layer_name not in PRESENTATION_METAL_LAYERS:
+        raise ValueError(
+            f"Sidecar layer {layer_name} is not a presentation metal layer"
+        )
+    gds_layer = data["gds_layer"]
+    xy_dbu = data["xy_dbu"]
+    triangles = data["triangles"]
+    boundary_edges = data["boundary_edges"]
+    offsets = data["component_triangle_offsets"]
+    dbu_um = float(scalar("dbu_um"))
+    component_count = int(scalar("logical_component_count"))
+    if gds_layer.shape != (2,):
+        raise ValueError(f"Invalid sidecar GDS layer shape: {gds_layer.shape}")
+    if xy_dbu.ndim != 2 or xy_dbu.shape[1] != 2 or len(xy_dbu) < 3:
+        raise ValueError(f"Invalid sidecar xy_dbu shape: {xy_dbu.shape}")
+    if triangles.ndim != 2 or triangles.shape[1] != 3 or len(triangles) == 0:
+        raise ValueError(f"Invalid sidecar triangles shape: {triangles.shape}")
+    if (
+        boundary_edges.ndim != 2
+        or boundary_edges.shape[1] != 2
+        or len(boundary_edges) == 0
+    ):
+        raise ValueError(
+            f"Invalid sidecar boundary_edges shape: {boundary_edges.shape}"
+        )
+    if dbu_um <= 0 or not np.isfinite(dbu_um):
+        raise ValueError(f"Invalid sidecar database unit: {dbu_um}")
+    if component_count <= 0 or offsets.shape != (component_count + 1,):
+        raise ValueError(
+            "Invalid sidecar component offsets: "
+            f"components={component_count}, offsets={offsets.shape}"
+        )
+    if (
+        offsets[0] != 0
+        or offsets[-1] != len(triangles)
+        or np.any(np.diff(offsets) <= 0)
+    ):
+        raise ValueError("Invalid sidecar component triangle ranges")
+    for name, indices in (
+        ("triangles", triangles),
+        ("boundary_edges", boundary_edges),
+    ):
+        if np.any(indices < 0) or np.any(indices >= len(xy_dbu)):
+            raise ValueError(f"Sidecar {name} contains out-of-range indices")
+
+    print(
+        "Loaded validated unfractured layer sidecar: "
+        f"{path} ({layer_name}, {component_count} logical components, "
+        f"{len(xy_dbu)} vertices, {len(triangles)} planar triangles, "
+        f"{len(boundary_edges)} boundary edges)"
+    )
+    return {
+        "layer_name": layer_name,
+        "gds_layer": tuple(int(value) for value in gds_layer),
+        "xy_dbu": xy_dbu.astype(np.int32, copy=False),
+        "triangles": triangles.astype(np.int32, copy=False),
+        "boundary_edges": boundary_edges.astype(np.int32, copy=False),
+        "dbu_um": dbu_um,
+        "component_count": component_count,
+    }
+
+
+def replace_with_unfractured_layer_mesh(
+    bpy: Any,
+    *,
+    obj: Any,
+    sidecar: dict[str, Any],
+) -> dict[str, int]:
+    import numpy as np
+
+    bpy.context.view_layer.update()
+    source_bounds = np.asarray(object_world_xy_bounds(obj), dtype=np.float64)
+    xy_world = sidecar["xy_dbu"] * sidecar["dbu_um"]
+    generated_bounds = np.asarray(
+        (
+            xy_world[:, 0].min(),
+            xy_world[:, 1].min(),
+            xy_world[:, 0].max(),
+            xy_world[:, 1].max(),
+        ),
+        dtype=np.float64,
+    )
+    tolerance = max(1.0e-4, sidecar["dbu_um"] * 2.0)
+    bound_error = float(np.max(np.abs(source_bounds - generated_bounds)))
+    if bound_error > tolerance:
+        raise RuntimeError(
+            f"Unfractured {sidecar['layer_name']} sidecar does not match "
+            f"imported bounds: source={source_bounds.tolist()}, "
+            f"generated={generated_bounds.tolist()}, max_error={bound_error:g}"
+        )
+
+    zmin, zmax = object_world_z_bounds(obj)
+    triangles = sidecar["triangles"]
+    boundary_edges = sidecar["boundary_edges"]
+    planar_vertex_count = len(xy_world)
+
+    world_coordinates = np.empty((planar_vertex_count * 2, 4), dtype=np.float64)
+    world_coordinates[:, 3] = 1.0
+    world_coordinates[:planar_vertex_count, :2] = xy_world
+    world_coordinates[planar_vertex_count:, :2] = xy_world
+    world_coordinates[:planar_vertex_count, 2] = zmin
+    world_coordinates[planar_vertex_count:, 2] = zmax
+    inverse = np.asarray(
+        [list(row) for row in obj.matrix_world.inverted()], dtype=np.float64
+    )
+    local_coordinates = (world_coordinates @ inverse.T)[:, :3].astype(np.float32)
+
+    bottom_triangles = triangles[:, (2, 1, 0)]
+    top_triangles = triangles + planar_vertex_count
+    bottom_edges = boundary_edges
+    top_edges = boundary_edges + planar_vertex_count
+    side_quads = np.column_stack(
+        (
+            bottom_edges[:, 0],
+            bottom_edges[:, 1],
+            top_edges[:, 1],
+            top_edges[:, 0],
+        )
+    ).astype(np.int32, copy=False)
+    loop_vertices = np.concatenate(
+        (
+            bottom_triangles.reshape(-1),
+            top_triangles.reshape(-1),
+            side_quads.reshape(-1),
+        )
+    ).astype(np.int32, copy=False)
+    polygon_count = len(bottom_triangles) + len(top_triangles) + len(side_quads)
+    loop_totals = np.empty(polygon_count, dtype=np.int32)
+    loop_totals[: len(bottom_triangles) + len(top_triangles)] = 3
+    loop_totals[len(bottom_triangles) + len(top_triangles) :] = 4
+    loop_starts = np.empty(polygon_count, dtype=np.int32)
+    loop_starts[0] = 0
+    np.cumsum(loop_totals[:-1], out=loop_starts[1:])
+
+    old_mesh = obj.data
+    mesh = bpy.data.meshes.new(f"{old_mesh.name}_Unfractured")
+    mesh.vertices.add(len(local_coordinates))
+    mesh.vertices.foreach_set("co", local_coordinates.reshape(-1))
+    mesh.loops.add(len(loop_vertices))
+    mesh.loops.foreach_set("vertex_index", loop_vertices)
+    mesh.polygons.add(polygon_count)
+    mesh.polygons.foreach_set("loop_start", loop_starts)
+    mesh.polygons.foreach_set("loop_total", loop_totals)
+    mesh.polygons.foreach_set(
+        "use_smooth", np.zeros(polygon_count, dtype=np.bool_)
+    )
+    for material in old_mesh.materials:
+        mesh.materials.append(material)
+    mesh.update(calc_edges=True)
+
+    obj.data = mesh
+    if old_mesh.users == 0:
+        bpy.data.meshes.remove(old_mesh)
+    obj["aim_unfractured_logical_component_count"] = sidecar["component_count"]
+    obj["aim_unfractured_planar_topology_validated"] = True
+    bpy.context.view_layer.update()
+    print(
+        f"Replaced {sidecar['layer_name']} with an unfractured watertight "
+        f"compound mesh: {len(local_coordinates)} vertices, {polygon_count} "
+        f"faces, {len(mesh.edges)} edges, {len(boundary_edges)} logical "
+        f"sidewalls; XY bound error={bound_error:g}"
+    )
+    return {
+        "vertices": len(local_coordinates),
+        "faces": polygon_count,
+        "edges": len(mesh.edges),
+        "sidewalls": len(boundary_edges),
+    }
+
+
+def apply_unfractured_sidecar_cap_bevel_shader(
+    bpy: Any,
+    *,
+    obj: Any,
+    layer_name: str,
+    triangle_count: int,
+    width_um: float,
+    samples: int,
+) -> None:
+    """Shade only planar caps and leave every sidewall face unchanged."""
+    import numpy as np
+
+    material = bpy.data.materials.get(f"Mat_{layer_name}")
+    if material is None:
+        raise RuntimeError(f"Sidecar layer material not found: Mat_{layer_name}")
+    material.use_nodes = True
+    node_tree = material.node_tree
+    bsdf = node_tree.nodes.get("Principled BSDF")
+    if bsdf is None or "Normal" not in bsdf.inputs:
+        raise RuntimeError(
+            f"Sidecar layer material has no Principled BSDF Normal input: "
+            f"{material.name}"
+        )
+
+    cap_slot = next(
+        (
+            index
+            for index, candidate in enumerate(obj.data.materials)
+            if candidate == material
+        ),
+        None,
+    )
+    if cap_slot is None:
+        raise RuntimeError(f"Sidecar layer does not use material: {material.name}")
+    side_material = material.copy()
+    side_material.name = f"Mat_{layer_name}_Sidewall"
+    side_material["aim_presentation_z_bevel_excluded_surface"] = "sidewall"
+    obj.data.materials.append(side_material)
+    side_slot = len(obj.data.materials) - 1
+
+    sidewall_start = triangle_count * 2
+    if sidewall_start > len(obj.data.polygons):
+        raise RuntimeError(
+            f"Invalid sidecar face layout for {layer_name}: "
+            f"{sidewall_start} cap faces > {len(obj.data.polygons)} total"
+        )
+    material_indices = np.full(
+        len(obj.data.polygons), cap_slot, dtype=np.int32
+    )
+    material_indices[sidewall_start:] = side_slot
+    obj.data.polygons.foreach_set("material_index", material_indices)
+
+    bevel = node_tree.nodes.get(PRESENTATION_Z_BEVEL_NODE)
+    if bevel is None:
+        bevel = node_tree.nodes.new("ShaderNodeBevel")
+        bevel.name = PRESENTATION_Z_BEVEL_NODE
+    bevel.label = "Unfractured sidecar cap-only Z bevel"
+    bevel.samples = samples
+    bevel.inputs["Radius"].default_value = width_um
+    bevel.location = (bsdf.location.x - 220.0, bsdf.location.y - 180.0)
+    normal_input = bsdf.inputs["Normal"]
+    existing_links = list(normal_input.links)
+    if existing_links and existing_links[0].from_node is not bevel:
+        source_socket = existing_links[0].from_socket
+        for link in list(bevel.inputs["Normal"].links):
+            node_tree.links.remove(link)
+        node_tree.links.new(source_socket, bevel.inputs["Normal"])
+    for link in existing_links:
+        node_tree.links.remove(link)
+    node_tree.links.new(bevel.outputs["Normal"], normal_input)
+
+    material["aim_presentation_metal_z_bevel_width_um"] = width_um
+    material["aim_presentation_metal_z_bevel_samples"] = samples
+    obj["aim_presentation_z_bevel_mode"] = (
+        "unfractured_sidecar_cap_shader_flat_sidewall"
+    )
+    obj["aim_presentation_z_bevel_width_um"] = width_um
+    obj["aim_presentation_z_bevel_samples"] = samples
+    obj["aim_sidewall_smooth"] = False
+    obj["aim_sidewall_bevel_shader"] = False
+    obj.data.update()
 
 
 def load_tiled_explicit_cladding_sidecar(path: Path) -> dict[str, Any]:
@@ -2098,6 +2442,11 @@ def build_scene(args: argparse.Namespace) -> None:
             args.cladding_unfractured_cutter,
             "Unfractured cladding cutter sidecar",
         )
+    for path in args.presentation_metal_z_bevel_sidecar:
+        require_file(
+            path,
+            "Unfractured presentation-metal layer sidecar",
+        )
     if args.cladding_explicit_mesh is not None:
         require_file(args.cladding_explicit_mesh, "Explicit cladding mesh sidecar")
     require_blendergds_operator(bpy)
@@ -2205,22 +2554,70 @@ def build_scene(args: argparse.Namespace) -> None:
     else:
         print("Omitted cladding and cladding undercut cutter")
 
+    sidecar_beveled_layers: list[str] = []
+    sidecar_bevel_records: list[tuple[str, Any, dict[str, Any]]] = []
+    for path in args.presentation_metal_z_bevel_sidecar:
+        sidecar = load_unfractured_layer_sidecar(path)
+        layer_name = sidecar["layer_name"]
+        if layer_name in sidecar_beveled_layers:
+            raise RuntimeError(f"Duplicate Z-bevel sidecar layer: {layer_name}")
+        obj = find_imported_layer_object(bpy, layer_name)
+        if obj is None:
+            raise RuntimeError(
+                f"Z-bevel sidecar requires imported layer L{layer_name}"
+            )
+        replace_with_unfractured_layer_mesh(
+            bpy,
+            obj=obj,
+            sidecar=sidecar,
+        )
+        sidecar_beveled_layers.append(layer_name)
+        sidecar_bevel_records.append((layer_name, obj, sidecar))
+
     if not args.no_apply_colors:
         updated = apply_color_schema(bpy, args.color_config)
         print(f"Updated {updated} materials from AIM color schema")
 
-    shaded_materials = apply_presentation_metal_z_bevel_shaders(
-        bpy,
-        width_um=args.presentation_metal_z_bevel_width_um,
-        samples=args.presentation_metal_bevel_segments,
-    )
-    if shaded_materials:
-        print(
-            "Presentation metal z-profile bevel shader: "
-            f"materials={shaded_materials}, "
-            f"width_um={args.presentation_metal_z_bevel_width_um}, "
-            f"samples={args.presentation_metal_bevel_segments}"
+    if sidecar_beveled_layers:
+        for layer_name, obj, sidecar in sidecar_bevel_records:
+            apply_unfractured_sidecar_cap_bevel_shader(
+                bpy,
+                obj=obj,
+                layer_name=layer_name,
+                triangle_count=len(sidecar["triangles"]),
+                width_um=args.presentation_metal_z_bevel_width_um,
+                samples=args.presentation_metal_bevel_segments,
+            )
+        scene["aim_presentation_metal_z_bevel_mode"] = (
+            "unfractured_sidecar_cap_shader_flat_sidewall"
         )
+        scene["aim_presentation_metal_z_bevel_width_um"] = (
+            args.presentation_metal_z_bevel_width_um
+        )
+        scene["aim_presentation_metal_z_bevel_samples"] = (
+            args.presentation_metal_bevel_segments
+        )
+        scene["aim_presentation_metal_z_bevel_layers"] = sidecar_beveled_layers
+        print(
+            "Presentation metal unfractured-sidecar cap-only Z bevel shader: "
+            f"layers={','.join(sidecar_beveled_layers)}, "
+            f"width_um={args.presentation_metal_z_bevel_width_um}, "
+            f"samples={args.presentation_metal_bevel_segments}, "
+            "sidewalls=flat_shader_free"
+        )
+    else:
+        shaded_materials = apply_presentation_metal_z_bevel_shaders(
+            bpy,
+            width_um=args.presentation_metal_z_bevel_width_um,
+            samples=args.presentation_metal_bevel_segments,
+        )
+        if shaded_materials:
+            print(
+                "Presentation metal z-profile bevel shader: "
+                f"materials={shaded_materials}, "
+                f"width_um={args.presentation_metal_z_bevel_width_um}, "
+                f"samples={args.presentation_metal_bevel_segments}"
+            )
 
     if not args.no_fit_camera:
         fitted = fit_camera_to_imported_layers(

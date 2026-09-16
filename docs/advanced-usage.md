@@ -113,6 +113,9 @@ conda run -n gds-blender-pipeline python scripts/aim_preprocess_gds.py \
 
 Direct flags:
 
+- `--max-polygon-vertices <count>`: fracture every visual-GDS boundary to
+  the requested limit. Pass `0` to disable fracture. The Make workflow keeps
+  the production-safe `256` default.
 - `--no-undercut`: do not apply TUAM to the etchable substrate and do not
   export the TUAM cladding cutter.
 - `--no-passivation-opening`: do not export the PAAM passivation cutter.
@@ -232,6 +235,7 @@ blender --background --python scripts/aim_build_blender_scene.py -- \
   --stack-config configs/blender/aim.yaml \
   --color-config configs/blender/colors/aim/realistic.yaml \
   --output .local/work/my_cell.realistic.blend \
+  --source-max-polygon-vertices 0 \
   --presentation-metal-z-bevel-width-um 0.10 \
   --presentation-metal-bevel-segments 8 \
   --no-merge-layers
@@ -241,11 +245,68 @@ The builder applies materials, handles cladding, fits the camera, removes
 PN-conflict debug objects, and saves the scene. Metal XY rounding belongs to the
 visual-GDS preprocessing stage above; the builder does not alter XY geometry.
 The optional z-profile treatment applies only to `M1AM_RENDER`, `M2AM_RENDER`,
-and `MLAM_RENDER`; cladding, silicon/doping, nitride, contact, and via layers are
-excluded. It uses an eight-sample Cycles bevel shader so highly tessellated
-metal rims do not expand into impractically large meshes. GLB retains the
-visual-GDS XY geometry; the Cycles-only z-profile treatment must be approximated
-by the target realtime renderer.
+and `MLAM_RENDER`; cladding, silicon/doping, nitride, contact, and via layers
+are excluded.
+
+The default production profile keeps visual-GDS XY rounding and the 256-vertex
+fracture limit, then automatically reconstructs unfractured sidecars for
+`M1AM_RENDER`, `M2AM_RENDER`, and `MLAM_RENDER`. Blender applies a 0.05 um
+Cycles bevel shader only to the planar top and bottom cap materials. Sidewalls
+remain flat and use a separate material with no Bevel node or normal override.
+
+For an exceptionally large GDS, disable sidecar generation and Z bevel while
+retaining the 256-vertex fracture limit:
+
+```sh
+AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED=0 \
+make aim-build GDS=path/to/very_large.gds
+```
+
+The direct small-GDS builder path shown above is still available with an
+unfractured visual GDS, `--source-max-polygon-vertices 0`, a positive bevel
+width, and no sidecars. The builder refuses a whole-layer Cycles shader bevel
+on fractured input because shared cuts
+would create false highlights.
+
+To override the automatic metal-layer set, generate a shared-edge-safe sidecar
+for a selected layer from the ordinary fractured visual GDS:
+
+```sh
+conda run -n gds-blender-pipeline python \
+  scripts/aim_generate_unfractured_layer_mesh.py \
+  --gds .local/runs/my_cell/visual/my_cell.visual.gds \
+  --stack-config configs/blender/aim.yaml \
+  --layer-name M2AM_RENDER \
+  --output .local/runs/my_cell/m2am.unfractured-layer.npz
+```
+
+Then repeat `--presentation-metal-z-bevel-sidecar` for every selected layer, or
+set `AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECARS`. A nonempty explicit list
+replaces the automatically generated M1/M2/ML list:
+
+```sh
+AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_WIDTH_UM=0.05 \
+AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECARS=.local/runs/my_cell/m2am.unfractured-layer.npz \
+make aim-build GDS=path/to/my_cell.gds
+```
+
+The sidecar path merges each selected layer back into logical components and
+reconstructs
+one watertight compound prism. The planar top and bottom caps keep the canonical
+metal material and receive the Cycles bevel node. Sidewall quads use flat shading
+and an otherwise identical separate material with no Bevel node and no normal
+override. The Z shader therefore cannot act on, smooth across, or amplify any
+sidewall or vertical edge in the XY outline. Any residual sidewall shape or
+reflection variation in this mode comes from the visual-GDS XY boundary and its
+faceted sidewall normals, not from the Z-rim shader. Both planar caps use the cap
+material, so the bottom rim is present but can only be inspected from below or in
+a view where the underside is visible. Horizontal triangulation edges and former
+GDS fracture cuts are coplanar inside the reconstructed caps, so they do not
+create false seams. This treatment is render-only; GLB retains the visual-GDS XY
+geometry and has no shader-generated Z profile.
+
+Without sidecars, the optional small-GDS treatment remains an eight-sample
+whole-layer Cycles bevel shader.
 
 ## Render Presets
 
@@ -536,8 +597,12 @@ Color keys must match layer names in `configs/blender/aim.yaml`.
 | `AIM_PREPROCESS_PASSIVATION_OPENING`          | `1`                                         | Export the PAAM passivation cutter                       |
 | `AIM_BLENDER_Z_SCALE`                         | `1.0`                                       | Vertical scale                                           |
 | `AIM_BLENDER_CAMERA_FIT_MARGIN`               | `1.10`                                      | Camera-fit margin                                        |
-| `AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_WIDTH_UM`   | `0`                                  | Cycles metal z-profile bevel radius in micrometers        |
+| `AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED`    | `1`                                  | Auto-generate sidecars and enable cap-only metal Z bevel  |
+| `AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_WIDTH_UM`   | `0.05`                               | Cycles metal cap-bevel radius in micrometers              |
 | `AIM_BLENDER_PRESENTATION_METAL_BEVEL_SEGMENTS`     | `8`                                  | Cycles metal bevel-shader samples                         |
+| `AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_LAYERS`     | M1/M2/ML render layers                    | Automatically generated sidecar layer names               |
+| `AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECAR_DIR` | beside the `.blend` in `metal-z-bevel-sidecars/` | Automatic sidecar output directory                 |
+| `AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_SIDECARS`   | empty                                | Explicit sidecars replacing the automatic layer set       |
 | `AIM_BLENDER_CLADDING_MODE`                   | `boolean`                                   | `boolean`, `solid`, or `omit`                            |
 | `AIM_BLENDER_CLADDING_BOOLEAN_SOLVER`         | `manifold`                                  | `manifold` or `exact`                                    |
 | `AIM_BLENDER_CLADDING_UNDERCUT_METHOD`        | `fractured_batches`                         | Undercut construction method                             |
