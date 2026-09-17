@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "root": "examples/aim/raw",
+      "include": [
+        "*.gds"
+      ],
+      "reason": "manual-only"
+    },
+    {
+      "root": "examples/sky130",
+      "include": [
+        "wrapped_vga_clock.gds"
+      ],
+      "reason": "manual-only"
+    },
+    {
+      "root": ".local/webapp/layouts",
+      "include": [
+        "*/raw/*_raw.gds"
+      ],
+      "reason": "manual-only"
+    }
+  ]
+}

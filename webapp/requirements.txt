@@ -1,0 +1,4 @@
+PyYAML==6.0.3
+gdstk==1.0.1
+gdsfactory==9.45.0
+shapely==2.1.2

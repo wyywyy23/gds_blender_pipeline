@@ -53,3 +53,7 @@ temp/
 
 # macOS
 .DS_Store
+
+# Standalone studio configuration, jobs and browser packages
+/.local/webapp/
+/webapp/node_modules/

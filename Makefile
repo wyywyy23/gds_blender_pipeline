@@ -371,3 +371,11 @@ aim-clean-generated:
 	rm -f $(AIM_BLENDERGDS_CONFIG)
 
 -include Makefile.local
+
+# Standalone, manually started web application (no FacultyOS dependency).
+.PHONY: web-setup web-app
+web-setup:
+	python3 scripts/setup_webapp.py
+
+web-app:
+	python3 scripts/start_webapp.py

@@ -1,0 +1,1 @@
+{"name":"gds-web-studio","version":"1.0.0","private":true,"type":"module","description":"Locally served 3D camera preview dependencies","dependencies":{"three":"0.180.0"}}

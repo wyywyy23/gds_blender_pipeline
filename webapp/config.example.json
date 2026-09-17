@@ -1,0 +1,9 @@
+{
+  "gds": "/absolute/path/to/layout.gds",
+  "tech": "external_pdks/AIMPhotonics_ACT1/tech.py",
+  "raw_custom": "configs/aim/raw_custom_layers.yaml",
+  "doping_rules": "configs/aim/doping_rules.yaml",
+  "render_static": "configs/aim/render_layers.static.yaml",
+  "python": "/absolute/path/to/python",
+  "blender": "/absolute/path/to/blender"
+}

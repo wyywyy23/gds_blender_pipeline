@@ -1,0 +1,1 @@
+{"schema_version":1,"entries":[{"label":"GDS Studio","path":"scripts/start_webapp.py","launch":{"args":["--background"]}},{"label":"Web app setup guide","path":"docs/web-app.md"}]}

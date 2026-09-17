@@ -122,6 +122,17 @@ def load_preset(path: Path) -> dict[str, Any]:
             camera_data.get("lens_mm"), "camera.lens_mm"
         ),
     }
+    if "sensor_width_mm" in camera_data:
+        camera["sensor_width_mm"] = require_positive_number(camera_data["sensor_width_mm"], "camera.sensor_width_mm")
+    if "dof" in camera_data:
+        dof = require_mapping(camera_data["dof"], "camera.dof")
+        if not isinstance(dof.get("enabled"), bool):
+            raise ValueError("camera.dof.enabled must be true or false")
+        camera["dof"] = {
+            "enabled": dof["enabled"],
+            "focus_point": require_vector3(dof.get("focus_point"), "camera.dof.focus_point"),
+            "aperture_fstop": require_positive_number(dof.get("aperture_fstop"), "camera.dof.aperture_fstop"),
+        }
     if "clip_start" in camera_data:
         camera["clip_start"] = require_positive_number(
             camera_data["clip_start"], "camera.clip_start"
@@ -239,6 +250,12 @@ def load_preset(path: Path) -> dict[str, Any]:
         "file_format": file_format,
         "transparent": transparent,
     }
+    for key in ("resolution_x", "resolution_y"):
+        if key in render_data:
+            value = render_data[key]
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 16384:
+                raise ValueError(f"render.{key} must be an integer in [1, 16384]")
+            render[key] = value
     if render["engine"] != "CYCLES":
         raise ValueError("Only the CYCLES render engine is currently supported")
 
@@ -392,6 +409,22 @@ def apply_camera(scene: Any, camera_config: dict[str, Any]) -> Any:
     )
     camera.data.type = camera_config["type"]
     camera.data.lens = camera_config["lens_mm"]
+    if "sensor_width_mm" in camera_config:
+        camera.data.sensor_fit = "HORIZONTAL"
+        camera.data.sensor_width = camera_config["sensor_width_mm"]
+        camera.data.shift_x = 0
+        camera.data.shift_y = 0
+    if "dof" in camera_config:
+        dof = camera_config["dof"]
+        camera.data.dof.use_dof = dof["enabled"]
+        camera.data.dof.aperture_fstop = dof["aperture_fstop"]
+        focus = bpy.data.objects.get("GDSStudioFocus")
+        if focus is None:
+            focus = bpy.data.objects.new("GDSStudioFocus", None)
+            scene.collection.objects.link(focus)
+        focus.location = dof["focus_point"]
+        focus.hide_render = True
+        camera.data.dof.focus_object = focus
     if "clip_start" in camera_config:
         camera.data.clip_start = camera_config["clip_start"]
     if "clip_end" in camera_config:
@@ -452,6 +485,13 @@ def apply_color_management(
 
 def apply_render_settings(scene: Any, render_config: dict[str, Any]) -> None:
     scene.render.engine = render_config["engine"]
+    for key in ("resolution_x", "resolution_y"):
+        if key in render_config:
+            setattr(scene.render, key, render_config[key])
+    if "resolution_x" in render_config or "resolution_y" in render_config:
+        scene.render.resolution_percentage = 100
+        scene.render.pixel_aspect_x = 1
+        scene.render.pixel_aspect_y = 1
     if render_config["device"] is not None:
         scene.cycles.device = render_config["device"]
     scene.cycles.samples = render_config["samples"]
