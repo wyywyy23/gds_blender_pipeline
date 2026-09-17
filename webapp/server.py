@@ -116,7 +116,7 @@ class Studio:
         visual=None
         if require_visual:
             visual=self.library.visual(layout,data.get('visual_id'))
-            if visual['fingerprint']!=current['fingerprint']:raise ValueError('Raw GDS, preprocessing code, configuration or options changed. Reload the visual preview before building or saving.')
+            if not self.library.visual_matches(layout,visual,current):raise ValueError('Raw GDS, preprocessing code, configuration or options changed. Reload the visual preview before building or saving.')
         return cfg,layout,opts,current,visual
 
     def check_visual(self,data):

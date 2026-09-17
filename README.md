@@ -33,13 +33,15 @@ Conda environments, Blender setup, alternate ports and troubleshooting.
 1. Select a saved layout, or import a raw `.gds` from any local path.
 2. **Check visual GDS** reports whether preprocessing is needed. Raw content, private
    configuration, preprocessing parameters/code and Python dependency versions are
-   checked by content. Unchanged inputs reuse a valid visual revision. Select **Force
+   checked by content, together with the preprocessing command plan. Render settings
+   and unrelated app/code changes reuse the existing visual. Select **Force
    regenerate visual GDS** to create a fresh revision regardless of the check.
 3. **Load visual preview** displays that visual GDS without building a Blender scene.
    Orbit, pan, dolly, or enter position, angles and focal length.
 4. Select layers and grouped options, then click **Build scene** or **Build scene &
    render**. The app automatically names and saves a preset from your current camera,
-   layer visibility, render and scene settings; no filename or separate save is needed.
+   layer visibility, render and scene settings. Its name starts with the current GDS
+   name; no filename or separate save is needed.
 5. Each build uses the exact visual revision you previewed and the saved preset.
    Identical settings and visual reuse an existing preset; changes are preserved
    separately. Progress, logs, cancellation and downloads remain available. Changed
@@ -59,8 +61,8 @@ Every layout has one home:
   raw/chip_raw.gds
   visual/v0001/chip_visual.gds
   visual/v0001/manifest.json
-  presets/auto_realistic_80mm_3200x2000_<settings-hash>/p0001.yaml
-  runs/run_0001_my_view_build_render/
+  presets/chip_realistic_80mm_3200x2000_<settings-hash>/p0001.yaml
+  runs/run_0001_chip_realistic_80mm_3200x2000_<settings-hash>_build_render/
     preset.yaml                 # exact camera snapshot for this run
     request.json                # raw, visual and source-preset references
     build/ready.blend

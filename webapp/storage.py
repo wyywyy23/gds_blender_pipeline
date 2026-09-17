@@ -3,18 +3,19 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
 import time
 import uuid
-from pipeline import FILES, file_hash, resolve_file
+from pipeline import FILES, file_hash, resolve_file, prepare_commands
 
 PREPROCESS_KEYS = ('metal_fillet', 'via_fillet', 'max_vertices', 'undercut', 'passivation')
 PREPROCESS_SCRIPTS = ('aim_generate_doping_render_layers.py', 'aim_merge_render_layers.py',
                       'aim_build_layer_registry.py', 'aim_generate_blendergds_config.py', 'aim_preprocess_gds.py')
 VISUAL_FILES = ('doping.yaml', 'layers.yaml', 'registry.yaml', 'stack.yaml')
+PRESET_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}')
 
 
 def read_json(path):
@@ -32,9 +33,55 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
-def slug(name):
+def preprocessing_plan(opts):
+    """Fingerprint the preprocessing argv, independent of local paths or render code."""
+    config = {key: '@input/' + key for key in FILES}
+    config['python'] = '@python'
+    return prepare_commands(config, opts, Path('@visual'), root=Path('@repo'))
+
+
+def recorded_plan_matches(commands, plan, visual_name):
+    """Check legacy argv against the current plan without executing it or rewriting history."""
+    if not isinstance(commands, list) or len(commands) != len(plan):
+        return False
+    bindings = {}
+
+    def bind(key, value):
+        if key in bindings:
+            return bindings[key] == value
+        bindings[key] = value
+        return True
+
+    for command, template in zip(commands, plan):
+        if not isinstance(command, list) or len(command) != len(template):
+            return False
+        for actual, expected in zip(command, template):
+            if not isinstance(actual, str) or not actual:
+                return False
+            if expected == '@python' or expected.startswith('@input/'):
+                if not bind(expected, actual):
+                    return False
+            elif expected.startswith('@repo/scripts/'):
+                path = PurePosixPath(actual.replace('\\', '/'))
+                if path.name != expected.rsplit('/', 1)[1] or path.parent.name != 'scripts':
+                    return False
+                if not bind('@repo', str(path.parent.parent)):
+                    return False
+            elif expected.startswith('@visual/'):
+                path = PurePosixPath(actual.replace('\\', '/'))
+                name = expected.rsplit('/', 1)[1]
+                if path.name != (visual_name if name == 'visual.gds' else name):
+                    return False
+                if not bind('@visual', str(path.parent)):
+                    return False
+            elif actual != expected:
+                return False
+    return True
+
+
+def slug(name, max_length=48):
     stem = re.sub(r'(?i)[_-]raw$', '', Path(name).stem)
-    return re.sub(r'[^A-Za-z0-9_-]+', '_', stem).strip('_-')[:48] or 'layout'
+    return re.sub(r'[^A-Za-z0-9_-]+', '_', stem).strip('_-')[:max_length] or 'layout'
 
 
 def canonical_settings(value):
@@ -48,7 +95,9 @@ def canonical_settings(value):
     return value
 
 
-def automatic_preset(value):
+def automatic_preset(value, layout_name):
+    if not isinstance(layout_name, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,47}', layout_name):
+        raise ValueError('Invalid layout name')
     value = canonical_settings(copy.deepcopy(value))
     # Browser mesh budgets do not affect the built scene or rendered output.
     value['webapp']['options'] = {
@@ -60,7 +109,7 @@ def automatic_preset(value):
     fingerprint = hashlib.sha256(json.dumps(settings, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
     lens = format(value['camera']['lens_mm'], '.6g').replace('.', 'p')
     render = value['render']
-    value['name'] = f"auto_{settings['options']['scheme']}_{lens}mm_{render['resolution_x']}x{render['resolution_y']}_{fingerprint[:12]}"
+    value['name'] = f"{layout_name}_{settings['options']['scheme']}_{lens}mm_{render['resolution_x']}x{render['resolution_y']}_{fingerprint[:12]}"
     value['webapp']['automatic'] = {'settings_sha256': fingerprint}
     return value
 
@@ -167,9 +216,8 @@ class Library:
         self.raw(layout)
         files = {key: file_hash(config[key]) for key in FILES if key != 'gds'}
         scripts = {name: file_hash(self.root / 'scripts' / name) for name in PREPROCESS_SCRIPTS}
-        # This module's version plus command construction cover adapter changes as well.
-        scripts['webapp/pipeline.py'] = file_hash(self.root / 'webapp/pipeline.py')
-        value = dict(format=1, raw_sha256=layout['raw_sha256'], inputs=files, scripts=scripts,
+        value = dict(format=2, raw_sha256=layout['raw_sha256'], inputs=files, scripts=scripts,
+                     plan=preprocessing_plan(opts),
                      options={key: opts[key] for key in PREPROCESS_KEYS}, environment=self.environment(config['python']))
         return dict(fingerprint=digest(value), recipe=value)
 
@@ -203,15 +251,40 @@ class Library:
                 continue
         return result
 
+    def visual_matches(self, layout, visual, current):
+        if visual['fingerprint'] == current['fingerprint']:
+            return True
+        previous = visual.get('recipe', {})
+        recipe = current['recipe']
+        if previous.get('format') != 1 or recipe.get('format') != 2:
+            return False
+        if visual['fingerprint'] != digest(previous):
+            return False
+        scripts = dict(previous.get('scripts', {}))
+        adapter_hash = scripts.pop('webapp/pipeline.py', None)
+        if not isinstance(adapter_hash, str) or not re.fullmatch(r'[a-f0-9]{64}', adapter_hash):
+            return False
+        if scripts != recipe['scripts']:
+            return False
+        if any(previous.get(key) != recipe[key] for key in ('raw_sha256', 'inputs', 'options', 'environment')):
+            return False
+        try:
+            commands = read_json(self.safe(self.visual_dir(layout, visual['id']) / 'commands.json'))
+        except (OSError, ValueError):
+            return False
+        return recorded_plan_matches(commands, recipe['plan'], layout['name'] + '_visual.gds')
+
     def check_visual(self, layout, current):
         valid = self.visuals(layout)
-        matching = next((value for value in valid if value['fingerprint'] == current['fingerprint']), None)
+        matching = next((value for value in valid if self.visual_matches(layout, value, current)), None)
         if matching:
             return dict(state='ready', reason=f"Ready · {matching['id']} will be reused", visual=matching)
         reasons = []
         if valid:
-            previous = valid[0]['recipe']
-            for key, label in [('raw_sha256', 'raw GDS'), ('inputs', 'configuration files'), ('scripts', 'preprocessing code'), ('options', 'preprocessing options'), ('environment', 'Python environment')]:
+            previous = copy.deepcopy(valid[0]['recipe'])
+            if previous.get('format') == 1:
+                previous.get('scripts', {}).pop('webapp/pipeline.py', None)
+            for key, label in [('raw_sha256', 'raw GDS'), ('inputs', 'configuration files'), ('scripts', 'preprocessing code'), ('plan', 'preprocessing command plan'), ('options', 'preprocessing options'), ('environment', 'Python environment')]:
                 if previous.get(key) != current['recipe'].get(key):
                     reasons.append(label)
         return dict(state='stale' if valid else 'missing', reason=('Changed: ' + ', '.join(reasons)) if reasons else 'No valid visual GDS; generation is required', visual=None)
@@ -239,14 +312,14 @@ class Library:
         directory = self.layout_dir(layout['id']) / 'runs'
         directory.mkdir(exist_ok=True)
         numbers = [int(p.name.split('_')[1]) for p in directory.iterdir() if re.match(r'run_\d+_', p.name)]
-        name = f"run_{max(numbers, default=0) + 1:04d}_{slug(preset_name)}_{action}"
+        name = f"run_{max(numbers, default=0) + 1:04d}_{slug(preset_name, max_length=128)}_{action}"
         target = self.safe(directory / name)
         target.mkdir()
         return target
 
     def save_preset(self, layout, value, expected_etag=None):
         name = value['name']
-        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}', name):
+        if not PRESET_NAME.fullmatch(name):
             raise ValueError('Invalid preset name')
         directory = self.safe(self.layout_dir(layout['id']) / 'presets' / name)
         directory.mkdir(parents=True, exist_ok=True)
@@ -272,7 +345,7 @@ class Library:
         A short-name collision is resolved with a new version, never an overwrite.
         """
         import yaml
-        value = automatic_preset(value)
+        value = automatic_preset(value, layout['name'])
         directory = self.safe(self.layout_dir(layout['id']) / 'presets' / value['name'])
         existing = sorted(directory.glob('p[0-9]*.yaml'))
         for path in existing:
@@ -299,7 +372,7 @@ class Library:
 
     def preset_path(self, identifier):
         parts = identifier.split('/')
-        if len(parts) != 3 or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}', parts[1]) or not re.fullmatch(r'p\d{4,}', parts[2]):
+        if len(parts) != 3 or not PRESET_NAME.fullmatch(parts[1]) or not re.fullmatch(r'p\d{4,}', parts[2]):
             raise ValueError('Invalid preset identifier')
         return self.safe(self.layout_dir(parts[0]) / 'presets' / parts[1] / (parts[2] + '.yaml'))
 

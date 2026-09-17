@@ -15,6 +15,7 @@ import pipeline
 spec=importlib.util.spec_from_file_location('studio_server',ROOT/'webapp/server.py')
 server=importlib.util.module_from_spec(spec);spec.loader.exec_module(server)
 import aim_render_scene
+import aim_build_blender_scene
 CAMERA={'location':[150,-200,300],'rotation_degrees':[30,0,25],'lens_mm':100,'dof':{'enabled':True,'focus_point':[1,2,3],'aperture_fstop':4}}
 
 class StudioTests(unittest.TestCase):
@@ -89,6 +90,45 @@ class StudioTests(unittest.TestCase):
         commands=pipeline.build_commands(cfg,pipeline.options({}),self.root)
         self.assertEqual(len(commands),7)
         self.assertNotIn('--presentation-metal-z-bevel-sidecar',commands[-2])
+        args=aim_build_blender_scene.parse_args(commands[-2][commands[-2].index('--')+1:])
+        self.assertEqual(args.source_max_polygon_vertices,256)
+        self.assertEqual(args.presentation_metal_z_bevel_width_um,0)
+        self.assertTrue(pipeline.DEFAULTS['metal_bevel'])
+    def test_fractured_metal_layers_get_matching_sidecars_and_valid_blender_arguments(self):
+        import gdstk
+        names=('M1AM_RENDER','M2AM_RENDER','MLAM_RENDER')
+        stack={name:{'index':20+i,'type':0} for i,name in enumerate(names)}
+        (self.root/'stack.yaml').write_text(yaml.safe_dump(stack))
+        cfg={key:'/tmp/input' for key in pipeline.FILES}|{'python':sys.executable,'blender':'blender'}
+        for present in [(name,) for name in names]+[names]:
+            with self.subTest(present=present):
+                lib=gdstk.Library();child=lib.new_cell('METAL');top=lib.new_cell('TOP');top.add(gdstk.Reference(child))
+                for name in present:
+                    shape=gdstk.ellipse((0,0),10,tolerance=0.001,layer=stack[name]['index'])
+                    child.add(*shape.fracture(max_points=32))
+                lib.write_gds(str(self.root/'visual.gds'))
+                opts=pipeline.options({'max_vertices':32});original=copy.deepcopy(opts)
+                commands=pipeline.build_commands(cfg,opts,self.root)
+                build=commands[-2];args=aim_build_blender_scene.parse_args(build[build.index('--')+1:])
+                generators=[cmd for cmd in commands if '--layer-name' in cmd]
+                self.assertEqual({cmd[cmd.index('--layer-name')+1] for cmd in generators},set(present))
+                self.assertEqual({Path(cmd[cmd.index('--output')+1]).resolve() for cmd in generators},set(args.presentation_metal_z_bevel_sidecar))
+                self.assertEqual(args.source_max_polygon_vertices,32)
+                self.assertEqual(args.presentation_metal_z_bevel_width_um,opts['bevel_width'])
+                self.assertEqual(opts,original)
+    def test_disabled_or_zero_width_bevel_has_valid_arguments_even_with_metal(self):
+        import gdstk
+        lib=gdstk.Library();cell=lib.new_cell('METAL');cell.add(gdstk.rectangle((0,0),(10,10),layer=20));lib.write_gds(str(self.root/'visual.gds'))
+        (self.root/'stack.yaml').write_text(yaml.safe_dump({'M1AM_RENDER':{'index':20,'type':0}}))
+        cfg={key:'/tmp/input' for key in pipeline.FILES}|{'python':sys.executable,'blender':'blender'}
+        for changes in ({'metal_bevel':False},{'bevel_width':0}):
+            with self.subTest(changes=changes):
+                commands=pipeline.build_commands(cfg,pipeline.options(changes),self.root)
+                self.assertFalse(any('--layer-name' in cmd for cmd in commands))
+                args=aim_build_blender_scene.parse_args(commands[-2][commands[-2].index('--')+1:])
+                self.assertEqual(args.presentation_metal_z_bevel_width_um,0)
+                self.assertEqual(args.presentation_metal_z_bevel_sidecar,[])
+                self.assertEqual(args.source_max_polygon_vertices,256)
     def test_job_conflicts_do_not_overwrite_configuration(self):
         studio=server.Studio(self.root);studio.active='existing'
         with self.assertRaisesRegex(ValueError,'active job'):studio.save_config({'gds':'test.gds'})

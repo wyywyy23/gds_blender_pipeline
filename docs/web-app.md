@@ -87,10 +87,18 @@ or load their visual. Existing CLI files and old job folders are preserved.
 
 **Check visual GDS** compares raw and configuration content, the preprocessing options
 (XY fillets, undercut, passivation and fracture limit), the five preprocessing scripts,
-the command-building module, and versions of the configured Python environment's
-geometry packages. A valid matching visual revision shows **Ready** and is reused.
+the actual preprocessing command plan, and versions of the configured Python
+environment's geometry packages. A valid matching visual revision shows **Ready** and is reused.
 Changing rendering samples, camera, color scheme or preview simplification does not
-regenerate visual GDS. Preview simplification and Z scale affect the interactive mesh.
+regenerate visual GDS. Changes to render defaults, Blender scene construction, preset
+naming or other unrelated app code also do not invalidate it; the complete shared
+`pipeline.py` module is not used as a preprocessing fingerprint. Preview simplification and Z scale affect the interactive mesh.
+
+Earlier manifests that hashed the whole pipeline remain reusable when raw/config
+content, preprocessing scripts/options and environment match, and their recorded
+commands exactly match the current preprocessing plan after accounting for local
+paths. Missing or incompatible command records require regeneration. This check
+never rewrites old manifests or breaks their preset/run references.
 
 Output checksums also matter: missing, partial or modified visual/stack output is not
 reused. Generation publishes a numbered `v0001`, `v0002`, … revision only after all
@@ -125,16 +133,24 @@ these defaults.
    Geometry changes require a refreshed preview before building; camera and final
    render options do not. Missing/changed preprocessing inputs are rejected at build
    time rather than silently rebuilding different geometry behind the chosen camera.
+   **Metal cap Z bevel** handles its dependencies automatically: for non-empty
+   M1/M2/ML render layers the app generates complete-layer sidecars from the checked
+   visual GDS, even when that GDS is fractured. If those metal layers are absent,
+   the build skips metal bevel while retaining the saved preference. No separate
+   change to the fracture limit or sidecar setting is needed.
 5. Enable Blender DOF, enter or pick a focus position, and choose the f-stop.
    **TODO: browser DOF blur.** Blender applies the saved focus/aperture settings.
 6. Click **Build scene** or **Build scene & render**. Before starting Blender, the app
    automatically names and saves an immutable preset from the current camera/DOF,
    layer visibility, render settings, production scene options, and any loaded
    lighting/color-management settings. There is no filename field or separate save.
-   A name such as `auto_realistic_80mm_3200x2000_<settings-hash>` summarizes the color
-   scheme, focal length and image size; the deterministic digest distinguishes all
-   saved settings. Preview mesh tolerance/budget, local input paths, the action button,
-   and force-regeneration flags do not participate in naming.
+   A name such as `chip_realistic_80mm_3200x2000_<settings-hash>` starts with the current
+   archived GDS name, followed by color scheme, focal length and image size; the
+   deterministic digest distinguishes all saved settings. The current GDS determines the prefix even when starting from
+   another layout's preset. Full archived layout names are retained; matching run
+   names use the same preset name. Older `auto_...` and manual presets remain
+   loadable under their original names. Preview mesh tolerance/budget, local input
+   paths, the action button and force-regeneration flags do not participate in naming.
 7. Identical settings linked to the same visual reuse the existing preset. Changed
    settings get another automatic name; using the same settings with a new visual
    creates another immutable `p0002.yaml` version under that name. Shared CLI/earlier
@@ -175,8 +191,8 @@ these historical files are neither moved nor rewritten.
       stack.yaml, registry.yaml, layers.yaml, doping.yaml
       manifest.json      # raw/config/code/environment fingerprint + output hashes
       commands.json
-    presets/<automatic-settings-name>/p0001.yaml
-    runs/run_0001_<automatic-settings-name>_build_render/
+    presets/<gds-name>_<settings-name>/p0001.yaml
+    runs/run_0001_<gds-name>_<settings-name>_build_render/
       request.json       # raw/visual identities, options, source and saved preset refs
       preset.yaml        # exact submitted camera/options for this run
       commands.json
@@ -247,3 +263,24 @@ Visual GDS, build files, rendered images and reproducible caches are not include
 these rules. Keep original raw bytes immutable; a changed source is a new version,
 not permission to overwrite a previously registered copy. A source-policy edit does
 not itself authorize uploading arbitrary files.
+
+### Imported preset layer visibility
+
+The app loads the first visibility run from a preset. For example,
+`ramzi_oblique_100mm.yaml` starts with `no_cladding`; loading it leaves the CLADDING
+layer unchecked. Legacy names such as `cladding` and Blender object names such as
+`LCLADDING_RENDER` map to the same `CLADDING_RENDER` checkbox. Checking that layer
+shows it in preview and removes it from the newly saved preset's hidden layers;
+unchecking hides it in both preview and Blender. Existing preset files and completed
+renders are preserved. Build again to apply a changed selection.
+
+### Output image dimensions
+
+**Lock image aspect ratio** is on by default under Render. Changing either width or
+height automatically scales the other side to the nearest whole pixel; for example,
+3200 × 2000 becomes 4800 × 3000 when width is set to 4800. Portrait images work the
+same way. Loading a preset uses its saved width-to-height ratio. Unlock the control
+to enter width and height independently, then lock it again to retain the new ratio.
+Defaults restores 3200 × 2000 with the lock enabled. Both sides must remain within
+the displayed size limits. The camera frame and next automatic preset use the
+resulting dimensions; resizing does not regenerate visual GDS.

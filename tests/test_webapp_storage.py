@@ -12,7 +12,7 @@ import yaml
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'webapp'))
 import pipeline
-from storage import Library, PREPROCESS_SCRIPTS, VISUAL_FILES, read_json, write_json, automatic_preset
+from storage import Library, PREPROCESS_SCRIPTS, VISUAL_FILES, read_json, write_json, automatic_preset, digest
 spec=importlib.util.spec_from_file_location('lineage_server',ROOT/'webapp/server.py')
 server=importlib.util.module_from_spec(spec);spec.loader.exec_module(server)
 CAMERA={'location':[10,-20,30],'rotation_degrees':[30,0,25],'lens_mm':80}
@@ -89,6 +89,83 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(self.library.check_visual(self.layout,recipe)['visual']['id'],visual['id'])
         self.assertEqual(self.library.check_visual(self.layout,recipe)['state'],'ready')
 
+    def legacy_visual(self, relocated=False):
+        value=self.ready_visual();directory=self.library.visual_dir(self.layout,value['id'])
+        recipe=copy.deepcopy(value['recipe']);recipe['format']=1;recipe.pop('plan')
+        recipe['scripts']['webapp/pipeline.py']=pipeline.file_hash(self.root/'webapp/pipeline.py')
+        value.update(recipe=recipe,fingerprint=digest(recipe));write_json(directory/'manifest.json',value)
+        config=self.cfg;command_root=self.root;output=directory
+        if relocated:
+            config={key:'/previous machine/private inputs/'+key for key in pipeline.FILES}|{'python':'/previous machine/python'}
+            command_root=Path('/previous machine/repo');output=Path('/previous machine/archive/visual')
+        commands=pipeline.prepare_commands(config,self.opts,output,root=command_root,visual_name=self.layout['name']+'_visual.gds')
+        write_json(directory/'commands.json',commands)
+        return value
+
+    def test_unrelated_pipeline_source_changes_do_not_invalidate_visual(self):
+        visual=self.ready_visual();before=self.library.recipe(self.layout,self.cfg,self.opts)
+        (self.root/'webapp/pipeline.py').write_text('# changed render defaults, camera and Blender build code\n')
+        after=self.library.recipe(self.layout,self.cfg,pipeline.options({'width':800,'samples':4096,'metal_bevel':False}))
+        self.assertEqual(before,after)
+        self.assertEqual(self.library.check_visual(self.layout,after)['visual']['id'],visual['id'])
+
+    def test_changed_preprocessing_command_plan_invalidates_visual(self):
+        self.ready_visual();original=pipeline.prepare_commands
+        def changed(*args,**kwargs):
+            commands=original(*args,**kwargs);commands[-1].append('--no-undercut');return commands
+        with patch('storage.prepare_commands',side_effect=changed):
+            current=self.library.recipe(self.layout,self.cfg,self.opts)
+        check=self.library.check_visual(self.layout,current)
+        self.assertEqual(check['state'],'stale');self.assertIn('command plan',check['reason'])
+
+    def test_legacy_visual_reused_by_preview_and_build_without_rewriting_history(self):
+        visual=self.legacy_visual();directory=self.library.visual_dir(self.layout,visual['id'])
+        before=(directory/'manifest.json').read_bytes()
+        (self.root/'webapp/pipeline.py').write_text('# unrelated build-only fix\n')
+        studio=self.studio();checked=studio.check_visual({'options':self.opts})
+        self.assertEqual(checked['visual']['id'],visual['id'])
+        with patch.object(server.threading.Thread,'start'):
+            job=studio.start(dict(action='build',camera=CAMERA,options=self.opts,visual_id=visual['id']))
+        request=read_json(studio.job_directories[job['id']]/'request.json')
+        self.assertEqual(request['lineage']['visual_fingerprint'],visual['fingerprint'])
+        self.assertEqual(request['recipe']['recipe']['format'],2)
+        self.assertEqual((directory/'manifest.json').read_bytes(),before)
+        self.assertEqual(len(list((directory.parent).glob('v*'))),1)
+
+    def test_legacy_command_paths_can_move_without_changing_the_recipe(self):
+        visual=self.legacy_visual(relocated=True)
+        current=self.library.recipe(self.layout,self.cfg,self.opts)
+        self.assertEqual(self.library.check_visual(self.layout,current)['visual']['id'],visual['id'])
+
+    def test_legacy_missing_changed_or_inconsistent_commands_are_not_reused(self):
+        visual=self.legacy_visual();path=self.library.visual_dir(self.layout,visual['id'])/'commands.json'
+        original=read_json(path);current=self.library.recipe(self.layout,self.cfg,self.opts)
+        path.unlink();self.assertEqual(self.library.check_visual(self.layout,current)['state'],'stale')
+        changed=copy.deepcopy(original);changed[-1].append('--no-undercut')
+        write_json(path,changed);self.assertEqual(self.library.check_visual(self.layout,current)['state'],'stale')
+        changed=copy.deepcopy(original);changed[1][changed[1].index('--doping')+1]='/other/doping.yaml'
+        write_json(path,changed);self.assertEqual(self.library.check_visual(self.layout,current)['state'],'stale')
+        path.write_text('not json');self.assertEqual(self.library.check_visual(self.layout,current)['state'],'stale')
+        write_json(path,original);self.assertEqual(self.library.check_visual(self.layout,current)['state'],'ready')
+
+    def test_legacy_compatibility_keeps_real_input_and_code_checks(self):
+        visual=self.legacy_visual();current=self.library.recipe(self.layout,self.cfg,self.opts)
+        for field in ('raw_sha256','inputs','options','scripts','environment'):
+            with self.subTest(field=field):
+                changed=copy.deepcopy(current);changed['recipe'][field]='changed';changed['fingerprint']=digest(changed['recipe'])
+                self.assertFalse(self.library.visual_matches(self.layout,visual,changed))
+        changed=copy.deepcopy(current);changed['recipe']['plan'][-1].append('--no-undercut');changed['fingerprint']=digest(changed['recipe'])
+        self.assertFalse(self.library.visual_matches(self.layout,visual,changed))
+
+    def test_force_after_legacy_reuse_creates_a_new_version(self):
+        visual=self.legacy_visual();directory=self.library.visual_dir(self.layout,visual['id']);before=(directory/'manifest.json').read_bytes()
+        current=self.library.recipe(self.layout,self.cfg,self.opts)
+        self.assertEqual(self.library.check_visual(self.layout,current)['state'],'ready')
+        forced=self.ready_visual(force=True)
+        self.assertEqual(forced['id'],'v0002');self.assertTrue(forced['forced']);self.assertEqual(forced['recipe']['format'],2)
+        self.assertEqual((directory/'manifest.json').read_bytes(),before)
+        self.assertEqual(self.library.check_visual(self.layout,current)['visual']['id'],'v0002')
+
     def test_preprocess_option_and_config_and_code_changes_invalidate(self):
         self.ready_visual();opts=pipeline.options({'metal_fillet':0.4})
         self.assertIn('options',self.library.check_visual(self.layout,self.library.recipe(self.layout,self.cfg,opts))['reason'])
@@ -141,12 +218,12 @@ class LibraryTests(unittest.TestCase):
 
     def test_automatic_name_uses_production_settings_not_preview_or_manual_name(self):
         original=pipeline.preset('old_name',CAMERA,self.opts,['M2AM_RENDER','M1AM_RENDER'])
-        first=automatic_preset(original)
+        first=automatic_preset(original, self.layout['name'])
         other=pipeline.preset('different_name',dict(CAMERA,lens_mm=80.0),self.opts|{'preview_tolerance':5,'preview_limit':1000},['M1AM_RENDER','M2AM_RENDER','M1AM_RENDER'])
         other['output']['directory']='/different/local/path'
-        self.assertEqual(first['name'],automatic_preset(other)['name'])
+        self.assertEqual(first['name'],automatic_preset(other, self.layout['name'])['name'])
         self.assertNotIn('preview_limit',first['webapp']['options'])
-        self.assertRegex(first['name'],r'^auto_realistic_80mm_3200x2000_[a-f0-9]{12}$')
+        self.assertRegex(first['name'],r'^Chip_Raw_realistic_80mm_3200x2000_[a-f0-9]{12}$')
         for changed in [
             pipeline.preset('view',dict(CAMERA,lens_mm=90),self.opts,['M2AM_RENDER','M1AM_RENDER']),
             pipeline.preset('view',CAMERA,self.opts|{'denoise':False},['M2AM_RENDER','M1AM_RENDER']),
@@ -154,8 +231,34 @@ class LibraryTests(unittest.TestCase):
             pipeline.preset('view',CAMERA,self.opts,[]),
             pipeline.preset('view',CAMERA,self.opts,['M2AM_RENDER','M1AM_RENDER'],{'lighting':{'sun':{'strength':3}}}),
         ]:
-            with self.subTest(changed=changed):self.assertNotEqual(first['name'],automatic_preset(changed)['name'])
+            with self.subTest(changed=changed):self.assertNotEqual(first['name'],automatic_preset(changed, self.layout['name'])['name'])
 
+    def test_current_gds_name_overrides_loaded_preset_name(self):
+        value=pipeline.preset('auto_other_layout',CAMERA,self.opts,[])
+        first=self.library.save_automatic_preset(self.layout,value)
+        second_source=self.workspace/'Second Chip.gds';shutil.copyfile(self.source,second_source)
+        second_layout=self.library.import_raw(second_source)
+        second=self.library.save_automatic_preset(second_layout,first['preset'])
+        self.assertTrue(first['preset']['name'].startswith(self.layout['name']+'_'))
+        self.assertTrue(second['preset']['name'].startswith(second_layout['name']+'_'))
+        self.assertNotEqual(first['preset']['name'],second['preset']['name'])
+        self.assertEqual(first['preset']['webapp']['automatic'],second['preset']['webapp']['automatic'])
+    def test_full_long_gds_name_round_trips_without_renaming_old_presets(self):
+        source=self.workspace/('long_layout_'*5+'.gds');shutil.copyfile(self.source,source)
+        layout=self.library.import_raw(source)
+        old=pipeline.preset('auto_legacy_camera',CAMERA,self.opts,[])
+        legacy=self.library.save_preset(layout,old);before=(self.root/legacy['path']).read_bytes()
+        saved=self.library.save_automatic_preset(layout,old);name=saved['preset']['name']
+        self.assertEqual(len(layout['name']),48)
+        self.assertTrue(name.startswith(layout['name']+'_'))
+        self.assertGreater(len(name),64);self.assertLessEqual(len(name),128)
+        studio=self.studio();write_json(studio.config_path,self.cfg|{'gds':str(self.library.raw(layout))})
+        self.assertEqual(studio.get_preset(saved['file'])['preset']['name'],name)
+        run=self.library.allocate_run(layout,'build_render',name)
+        self.assertIn(name,run.name)
+        self.assertEqual(self.library.save_automatic_preset(layout,old)['file'],saved['file'])
+        self.assertEqual((self.root/legacy['path']).read_bytes(),before)
+        self.assertEqual(studio.get_preset(legacy['file'])['preset']['name'],'auto_legacy_camera')
     def test_both_build_actions_save_before_work_and_reuse_exact_preset(self):
         visual=self.ready_visual();studio=self.studio()
         data=dict(camera=CAMERA,options=self.opts,hidden_layers=['M2AM_RENDER'],layout_id=self.layout['id'],visual_id=visual['id'])
@@ -168,6 +271,8 @@ class LibraryTests(unittest.TestCase):
                 self.assertTrue(archived.is_file())
                 self.assertEqual((run/'preset.yaml').read_bytes(),archived.read_bytes())
                 request=read_json(run/'request.json')
+                self.assertTrue(request['preset']['name'].startswith(self.layout['name']+'_'))
+                self.assertIn(request['preset']['name'],run.name)
                 self.assertEqual(request['saved_preset'],reference)
                 self.assertEqual(request['preset']['camera']['lens_mm'],80)
                 self.assertEqual(request['preset']['webapp']['lineage']['visual_id'],visual['id'])
