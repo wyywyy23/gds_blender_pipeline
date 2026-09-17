@@ -57,3 +57,6 @@ temp/
 # Standalone studio configuration, jobs and browser packages
 /.local/webapp/
 /webapp/node_modules/
+
+# Private workflows, saved inputs and generated local state
+/.local/

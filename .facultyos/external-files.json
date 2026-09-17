@@ -21,6 +21,76 @@
         "*/raw/*_raw.gds"
       ],
       "reason": "manual-only"
+    },
+    {
+      "root": ".",
+      "include": [
+        "Makefile.local"
+      ],
+      "reason": "manual-only"
+    },
+    {
+      "root": "external_pdks/AIMPhotonics_ACT1",
+      "include": [
+        "tech.py"
+      ],
+      "reason": "manual-only"
+    },
+    {
+      "root": "configs/aim",
+      "include": [
+        "doping_rules.yaml",
+        "raw_custom_layers.yaml",
+        "render_layers.static.yaml"
+      ],
+      "reason": "manual-only"
+    },
+    {
+      "root": "configs/blender/render_presets",
+      "include": [
+        "*.local.yaml"
+      ],
+      "reason": "manual-only"
+    },
+    {
+      "root": ".local",
+      "include": [
+        "*.py"
+      ],
+      "reason": "manual-only"
+    },
+    {
+      "root": ".local/hpc",
+      "include": [
+        "Makefile",
+        "*.py",
+        "*.md",
+        "slurm/*.sbatch"
+      ],
+      "reason": "manual-only"
+    },
+    {
+      "root": ".local/webapp",
+      "include": [
+        "config.json"
+      ],
+      "reason": "manual-only"
+    },
+    {
+      "root": ".local/webapp/jobs",
+      "include": [
+        "*/request.json"
+      ],
+      "reason": "manual-only"
+    },
+    {
+      "root": ".local/webapp/layouts",
+      "include": [
+        "*/layout.json",
+        "*/presets/*/*.yaml",
+        "*/runs/*/request.json"
+      ],
+      "reason": "manual-only"
     }
   ]
 }
