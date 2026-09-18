@@ -21,6 +21,21 @@ CAMERA={'location':[150,-200,300],'rotation_degrees':[30,0,25],'lens_mm':100,'do
 class StudioTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
+    def test_iridescence_preset_and_preprocessing_independence(self):
+        off=pipeline.options({});on=pipeline.options({'iridescence':True,'iridescence_strength':.6})
+        cfg={key:'/tmp/input' for key in pipeline.FILES}|{'python':sys.executable,'blender':'blender'}
+        self.assertEqual(pipeline.prepare_commands(cfg,off,self.root),pipeline.prepare_commands(cfg,on,self.root))
+        self.assertFalse(off['iridescence'])
+        self.assertEqual(off['iridescence_strength'], .85)
+        for opts in [off,on,pipeline.options({'iridescence':True,'iridescence_strength':0})]:
+            value=pipeline.preset('film',CAMERA,opts,[])
+            path=self.root/'film.yaml';path.write_text(yaml.safe_dump(value))
+            loaded=aim_render_scene.load_preset(path)
+            self.assertEqual(loaded['appearance']['cladding_iridescence'],dict(enabled=opts['iridescence'],strength=opts['iridescence_strength']))
+        legacy=aim_render_scene.load_preset(ROOT/'configs/blender/render_presets/disk_array_oblique_100mm.yaml')
+        self.assertFalse(legacy['appearance']['cladding_iridescence']['enabled'])
+        for bad in [{'iridescence':'true'},{'iridescence_strength':float('nan')},{'iridescence_strength':1.1}]:
+            with self.assertRaises(ValueError):pipeline.options(bad)
     def test_strict_options_and_camera_validation(self):
         for values in [{'samples':0},{'denoise':'false'},{'scheme':'../../private'},{'width':10.5},{'z_scale':float('nan')},{'unknown':1}]:
             with self.subTest(values=values),self.assertRaises(ValueError):pipeline.options(values)

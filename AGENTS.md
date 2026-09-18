@@ -33,8 +33,17 @@
   covered regions must remain distinguishable from holes, with glass character
   and readable devices beneath. Check Ramzi for duplicated outlines and TX
   checkered for openings, with the original glass openings as the appearance
-  reference. Keep cladding neutral; reject cold fill, milky haze or uniformly
-  colored blocks. Check actual shader paths before attributing glass character
+  reference. Keep default cladding neutral. For the optional thin-film effect,
+  cyan and stronger colored reflections are acceptable while device lines, hole
+  boundaries and refractive walls remain readable. Evaluate color separately
+  from structural clarity; reject obscuring haze and lost opening definition.
+  Optional iridescence should preserve baseline brightness and contrast: compare
+  at fixed exposure and separate material changes from added illumination. Label
+  normalized reflection color as a presentation approximation, not absolute
+  physical thin-film reflectance. Global brightness/contrast statistics do not
+  establish visual acceptance: inspect hue variety, local device/metal/opening
+  contrast and actual user feedback before recommending a look.
+  Check actual shader paths before attributing glass character
   to IOR: the value must govern the relevant reflection/refraction branch.
   Shared cladding settings must work across GDS layouts; validation examples
   must not introduce filename-, device- or coordinate-specific material branches.

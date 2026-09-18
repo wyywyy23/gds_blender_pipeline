@@ -284,3 +284,45 @@ to enter width and height independently, then lock it again to retain the new ra
 Defaults restores 3200 × 2000 with the lock enabled. Both sides must remain within
 the displayed size limits. The camera frame and next automatic preset use the
 resulting dimensions; resizing does not regenerate visual GDS.
+
+## Optional adaptive iridescence
+
+Under **Appearance**, enable **Adaptive iridescence (final render)** for broad,
+slightly curved cladding color bands fitted to the current camera view. The default
+is off. **Iridescence strength** ranges from 0 to 1; its starting value is **0.85**,
+and 0 is equivalent to off. Both settings are saved automatically in presets.
+Loading a preset without appearance settings disables the effect; an explicitly
+saved strength is retained. The web mesh preview shows geometry; inspect the final
+Blender render for this surface effect.
+
+The selected treatment fits approximately **1.5 reference interference periods**
+to the visible cladding top-plane extent, with a 28-degree thickness-gradient
+orientation and mild 25 nm low-frequency thickness variation. Actual RGB color-band
+counts vary with view angle and geometry. Camera framing and render dimensions are
+applied before fitting the pattern. Changing the camera in a saved Blender scene
+requires reapplying its preset to refit the pattern and reposition the white light.
+Prepared `.blend` files contain the native shader and lighting and can render
+without this repository's Python scripts.
+
+The accepted lighting balance reduces existing Sun energies by 10%, adds a white
+area light linked only to cladding at energy multiplier 0.4, and reduces existing
+neutral studio reflection to one quarter (Realistic: 0.4 to 0.1). Clear transmission
+and the original opening-wall glass remain intact. Disabling, setting strength to
+zero, or hiding/omitting cladding restores the original Sun energies, neutral sheen
+and cap shader, and removes only effect-owned nodes, light and receiver collection.
+Repeated application does not accumulate lights or repeatedly dim the Sun. Loading
+a new preset restores the old effect first, then applies the new preset's lighting.
+
+CLI presets use the same configuration (verified in Blender 5.2.2 LTS):
+
+```yaml
+appearance:
+  cladding_iridescence:
+    enabled: true
+    strength: 0.85
+```
+
+The film is a presentation hypothesis, not measured chip thickness or a full optical
+multilayer simulation. Existing archived presets/scenes stay unchanged; newly
+prepared scenes with the option enabled receive the selected adaptive treatment.
+See [the comparison and acceptance notes](microscope-iridescence.md).

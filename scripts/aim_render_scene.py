@@ -14,6 +14,9 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT / 'scripts') not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / 'scripts'))
+from aim_cladding_iridescence import normalize_appearance, apply_iridescence, reset_iridescence
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 FORMAT_EXTENSIONS = {
     "BMP": ".bmp",
@@ -306,6 +309,7 @@ def load_preset(path: Path) -> dict[str, Any]:
         "camera": camera,
         "lighting": lighting,
         "color_management": color_management,
+        "appearance": normalize_appearance(data.get("appearance")),
         "render": render,
         "output_directory": directory,
         "runs": runs,
@@ -543,6 +547,7 @@ def render_preset(args: argparse.Namespace) -> None:
     preset = load_preset(args.preset)
     runs = select_runs(preset["runs"], args.runs)
     scene = bpy.context.scene
+    reset_iridescence(scene)
     apply_camera(scene, preset["camera"])
     apply_lighting(scene, preset["lighting"])
     apply_color_management(scene, preset["color_management"])
@@ -563,6 +568,7 @@ def render_preset(args: argparse.Namespace) -> None:
     if not args.dry_run:
         output_dir.mkdir(parents=True, exist_ok=True)
     extension = FORMAT_EXTENSIONS[preset["render"]["file_format"]]
+    reset_iridescence(scene)
     baseline_visibility = {obj: obj.hide_render for obj in scene.objects}
     baseline_shadow_visibility = {
         obj: obj.visible_shadow
@@ -578,6 +584,7 @@ def render_preset(args: argparse.Namespace) -> None:
                 obj.visible_shadow = visible_shadow
             hidden_objects = apply_run_visibility(run, resolved_layers)
             shadowless_objects = apply_run_shadow_visibility(run, resolved_layers)
+            apply_iridescence(scene, preset["appearance"])
 
             filename = (
                 f"{blend_stem}.{preset['name']}.{run['name']}{extension}"

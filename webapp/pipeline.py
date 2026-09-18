@@ -18,6 +18,8 @@ FILES = {
 # Geometry defaults mirror the production Makefile; Studio uses higher-quality render defaults.
 OPTIONS = [
     dict(key='scheme', label='Color scheme', group='Appearance', default='realistic', choices=['realistic','fancy','marketing']),
+    dict(key='iridescence', label='Adaptive iridescence (final render)', group='Appearance', default=False),
+    dict(key='iridescence_strength', label='Iridescence strength', group='Appearance', default=0.85, min=0, max=1, step=0.05),
     dict(key='metal_bevel', label='Metal cap Z bevel', group='Appearance', default=True),
     dict(key='bevel_width', label='Cap bevel width (µm)', group='Appearance', default=0.05, min=0, max=5, step=0.01),
     dict(key='metal_fillet', label='Metal XY rounding (µm)', group='Appearance', default=0.20, min=0, max=10, step=0.05),
@@ -85,6 +87,7 @@ def preset(name, cam, opts, hidden, base=None):
     # Preserve existing lighting and color-management when editing a CLI preset.
     result={k:v for k,v in (base or {}).items() if k in ('lighting','color_management')}
     result.update(version=1,name=name,camera=camera(cam),render=dict(engine='CYCLES',device='CPU',samples=opts['samples'],denoise=opts['denoise'],adaptive_sampling=opts['adaptive_sampling'],transparent=opts['transparent'],file_format='PNG',resolution_x=opts['width'],resolution_y=opts['height']),output={'directory':'.local/webapp/renders'},runs=[dict(name='web_view',hide_layers=sorted(set(hidden)))],webapp={'options':opts})
+    result['appearance'] = {'cladding_iridescence': {'enabled': opts['iridescence'], 'strength': opts['iridescence_strength']}}
     return result
 
 

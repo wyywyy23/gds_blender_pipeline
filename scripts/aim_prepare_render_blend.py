@@ -14,6 +14,8 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from aim_render_scene import (
     apply_camera,
+    apply_iridescence,
+    reset_iridescence,
     apply_color_management,
     apply_lighting,
     apply_render_settings,
@@ -121,6 +123,7 @@ def prepare_render_blend(args: argparse.Namespace) -> None:
         )
 
     scene = bpy.context.scene
+    reset_iridescence(scene)
     resolved_layers = resolve_run_layer_objects(scene, run)
     apply_camera(scene, preset["camera"])
     apply_lighting(scene, preset["lighting"])
@@ -128,6 +131,7 @@ def prepare_render_blend(args: argparse.Namespace) -> None:
     apply_render_settings(scene, preset["render"])
     hidden_objects = apply_run_visibility(run, resolved_layers)
     shadowless_objects = apply_run_shadow_visibility(run, resolved_layers)
+    apply_iridescence(scene, preset["appearance"])
 
     scene.render.filepath = args.render_output or default_render_output(output)
     scene["aim_render_preset"] = preset["name"]
