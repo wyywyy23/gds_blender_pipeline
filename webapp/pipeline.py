@@ -37,7 +37,7 @@ OPTIONS = [
     dict(key='merge_layers', label='Merge objects per layer', group='Performance', default=False),
     dict(key='max_vertices', label='GDS fracture vertex limit', group='Performance', default=256, min=4, max=8190, step=1),
     dict(key='preview_tolerance', label='Preview simplification (µm)', group='Performance', default=0.05, min=0, max=20, step=0.01),
-    dict(key='preview_limit', label='Preview triangle budget', group='Performance', default=500000, min=1000, max=2000000, step=1),
+    dict(key='preview_limit', label='Preview triangle budget', group='Performance', default=1000000, min=1000, max=2000000, step=1),
 ]
 DEFAULTS = {x['key']:x['default'] for x in OPTIONS}
 
@@ -173,7 +173,8 @@ def preview_mesh(visual, stack, opts, root=ROOT):
         def tri(a,b,c):
             nonlocal triangles
             triangles+=1
-            if triangles>opts['preview_limit']:raise ValueError('Preview exceeds triangle budget. Increase simplification or triangle budget, or use a smaller GDS crop. No geometry was silently dropped.')
+            if triangles>opts['preview_limit']:
+                raise ValueError(f"Preview exceeds the {opts['preview_limit']:,}-triangle budget while adding {name}. Increase Preview triangle budget in Performance, increase preview simplification, or use a smaller GDS crop. No geometry was silently dropped.")
             for point in (a,b,c):
                 vertices.extend(point)
                 for i in range(3):bounds[0][i]=min(bounds[0][i],point[i]);bounds[1][i]=max(bounds[1][i],point[i])

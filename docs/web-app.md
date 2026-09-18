@@ -166,8 +166,12 @@ these defaults.
 The preview approximates shapes and composition. It omits optical materials,
 shader bevels and 3D cladding cutter booleans; mesh simplification may reduce XY detail. Transparent cladding
 can be hidden to inspect internal layers. Geometric simplification is controlled
-separately from final output. A triangle-budget error stops the preview with an
-explanation; the app never silently discards polygons to fit a budget.
+separately from final output. The default triangle budget is 1,000,000, sufficient
+for the complete TX checkered layout at the default 0.05 µm simplification
+(688,460 triangles in the validated layout). The budget remains adjustable in **Performance**, up
+to 2,000,000. Raising it preserves detail; it does not change final output.
+A triangle-budget error identifies the active limit and layer; the app never
+silently discards polygons to fit a budget.
 
 ## Layout library and output
 
