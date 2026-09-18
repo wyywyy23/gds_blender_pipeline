@@ -28,3 +28,13 @@
 - Link output dimensions by default using the current or loaded preset aspect
   ratio, including portrait images. Keep integer pixel bounds, provide an explicit
   unlock, and keep preview framing and saved/rendered dimensions in agreement.
+- Validate cladding appearance with matched cladding-on/off renders and a layout
+  containing real undercut openings. Suppressing ghost images is insufficient:
+  covered regions must remain distinguishable from holes, with glass character
+  and readable devices beneath. Check Ramzi for duplicated outlines and TX
+  checkered for openings, with the original glass openings as the appearance
+  reference. Keep cladding neutral; reject cold fill, milky haze or uniformly
+  colored blocks. Check actual shader paths before attributing glass character
+  to IOR: the value must govern the relevant reflection/refraction branch.
+  Shared cladding settings must work across GDS layouts; validation examples
+  must not introduce filename-, device- or coordinate-specific material branches.

@@ -14,12 +14,16 @@ layers:
 
   # Polished clear cladding.
   CLADDING_RENDER:
-    Base Color: [0.92, 0.97, 1.0, 0.18]
-    Alpha: 0.18
-    Roughness: 0.0
+    Base Color: [1.0, 1.0, 1.0, 0.16]
+    Alpha: 0.16
+    Roughness: 0.015
     Metallic: 0.0
     IOR: 1.45
     Transmission Weight: 0.82
+
+    # Neutral glass: sharp cap transmission and real IOR on opening walls.
+    Presentation Glass:
+      surface_sheen: 0.3
 
   # Hidden by default after the cladding boolean; colored for debug display.
   CLADDING_UNDERCUT_CUTTER_RENDER:

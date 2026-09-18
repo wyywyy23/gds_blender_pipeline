@@ -541,7 +541,7 @@ Short names are resolved to render-layer names such as `CBAM_RENDER`.
 
 | File                                        | Style                                   |
 | ------------------------------------------- | --------------------------------------- |
-| `configs/blender/colors/aim/realistic.yaml` | Physically plausible materials; default |
+| `configs/blender/colors/aim/realistic.yaml` | Muted silicon and metal palette; default |
 | `configs/blender/colors/aim/fancy.yaml`     | High color and light contrast           |
 | `configs/blender/colors/aim/marketing.yaml` | Graphite, champagne, and platinum       |
 
@@ -556,6 +556,42 @@ make aim-build-scene
 ```
 
 Color keys must match layer names in `configs/blender/aim.yaml`.
+
+### Glass cladding
+
+All three schemes use neutral `CLADDING_RENDER` glass with an IOR of 1.45.
+`Presentation Glass` separates horizontal caps from real opening walls using
+geometric normals in object space. It does not alter geometry or thickness.
+
+Horizontal caps use straight-through transmission and Fresnel-weighted glossy
+reflection. Avoiding refraction on these broad faces keeps buried device outlines
+aligned instead of superimposing shifted and unshifted images. Back-facing caps
+pass through. Real vertical opening walls retain the Principled glass, including
+its real IOR, transmission, alpha and roughness, to preserve optical depth and
+reflection at undercuts. Thus the IOR still affects wall refraction and cap
+reflection; this is not globally index-matched or color-tinted glass.
+
+`Presentation Glass` requires one parameter, `surface_sheen`, a finite number in
+[0, 1]. It sets a weak neutral studio reflection reference before Fresnel weighting.
+This additive camera-only reference is confined to caps: it cannot illuminate
+other objects and does not color transmission or brighten whole walls into blocks.
+Set it to zero to use only scene-driven glossy reflections. `Roughness` controls
+cap highlights and the physical wall glass. A glossy-reflection-ray bypass reduces
+repeated images without bypassing glossy *transmission* rays through the walls.
+
+Realistic, Fancy and Marketing retain their device palettes, with only restrained
+neutral differences in cladding sheen and roughness. Compare matched cladding-on
+and cladding-off views, using Ramzi for duplicated device outlines and TX checkered
+for actual opening shape. Use the original glass openings as an appearance
+reference; sharp outlines alone are insufficient. Cold fill and fully refractive
+caps were tried and rejected: the former looked plastic, while the latter produced
+large apparent offsets among buried layers.
+
+This hybrid is for structural illustration, not quantitative optical simulation.
+Removing `Presentation Glass` restores the regular Principled material. Reapplying
+a scheme replaces managed nodes without accumulating them. Rebuild to apply a new
+scheme to an older saved scene; archived scenes and presets stay unchanged.
+
 
 ## Make Variables
 

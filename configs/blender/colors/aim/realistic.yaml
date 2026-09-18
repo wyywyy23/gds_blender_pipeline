@@ -20,12 +20,16 @@ layers:
   # Clear oxide/glass cladding.
   # GDS layer/datatype: 2010/0
   CLADDING_RENDER:
-    Base Color: [0.91, 0.98, 1.0, 0.16]
+    Base Color: [1.0, 1.0, 1.0, 0.16]
     Alpha: 0.16
     Roughness: 0.02
     Metallic: 0.0
     IOR: 1.45
     Transmission Weight: 0.86
+
+    # Neutral glass: sharp cap transmission and real IOR on opening walls.
+    Presentation Glass:
+      surface_sheen: 0.4
 
   # Hidden by default after the cladding boolean; colored only for debug display.
   # GDS layer/datatype: 2050/0

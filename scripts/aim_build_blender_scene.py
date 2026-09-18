@@ -2391,6 +2391,115 @@ def set_bsdf_input(bsdf: Any, material: Any, key: str, value: Any) -> None:
         print(f"Unknown Principled BSDF input: {key}")
 
 
+def apply_cladding_presentation_glass(
+    material: Any, bsdf: Any, material_cfg: dict[str, Any]
+) -> None:
+    """Keep cap transmission aligned while retaining real glass opening walls."""
+    config = material_cfg.get("Presentation Glass")
+    if config is not None:
+        if not isinstance(config, dict) or set(config) != {"surface_sheen"}:
+            raise ValueError("Presentation Glass requires only surface_sheen")
+        value = config["surface_sheen"]
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or not 0 <= value <= 1):
+            raise ValueError("Presentation Glass surface_sheen must be finite and in [0, 1]")
+
+    tree = material.node_tree
+    output = next((n for n in tree.nodes
+                   if n.type == "OUTPUT_MATERIAL" and n.is_active_output), None)
+    if output is None:
+        raise ValueError(f"Cladding material {material.name} has no active output")
+    owned_nodes = [n for n in tree.nodes if n.get("aim_presentation_glass")]
+    for item in owned_nodes:
+        tree.nodes.remove(item)
+    if config is None:
+        if owned_nodes:
+            tree.links.new(bsdf.outputs["BSDF"], output.inputs["Surface"])
+        return
+
+    def node(kind: str, name: str) -> Any:
+        result = tree.nodes.new(kind)
+        result.name = f"AIM_Glass_{name}"
+        result.label = name
+        result["aim_presentation_glass"] = True
+        return result
+
+    def math_node(operation: str, name: str) -> Any:
+        result = node("ShaderNodeMath", name)
+        result.operation = operation
+        return result
+
+    geometry = node("ShaderNodeNewGeometry", "Geometry")
+    normal = node("ShaderNodeVectorTransform", "Object normal")
+    normal.vector_type = "NORMAL"
+    normal.convert_from = "WORLD"
+    normal.convert_to = "OBJECT"
+    separate = node("ShaderNodeSeparateXYZ", "Normal Z")
+    absolute_z = math_node("ABSOLUTE", "Absolute Z")
+    wall = math_node("LESS_THAN", "Wall mask")
+    wall.inputs[1].default_value = 0.5
+    fresnel = node("ShaderNodeFresnel", "Glass Fresnel")
+    fresnel.inputs["IOR"].default_value = bsdf.inputs["IOR"].default_value
+    transparent = node("ShaderNodeBsdfTransparent", "Clear transmission")
+    transparent.inputs["Color"].default_value = (1, 1, 1, 1)
+    glossy = node("ShaderNodeBsdfGlossy", "Glass reflection")
+    glossy.inputs["Color"].default_value = (1, 1, 1, 1)
+    glossy.inputs["Roughness"].default_value = bsdf.inputs["Roughness"].default_value
+    path = node("ShaderNodeLightPath", "Light path")
+    # Neutral camera-only studio reflection reference, weighted by Fresnel.
+    # It adds no tint to transmission and cannot illuminate nearby devices.
+    camera_sheen = math_node("MULTIPLY", "Camera-only sheen")
+    camera_sheen.inputs[1].default_value = config["surface_sheen"]
+    studio = node("ShaderNodeEmission", "Neutral studio reflection")
+    studio.inputs["Color"].default_value = (1, 1, 1, 1)
+    reflection_sum = node("ShaderNodeAddShader", "Surface reflections")
+    cap_glass = node("ShaderNodeMixShader", "Glass cap")
+    shell = node("ShaderNodeMixShader", "Refractive opening walls")
+    cap = math_node("SUBTRACT", "Cap mask")
+    cap.inputs[0].default_value = 1
+    back_cap = math_node("MULTIPLY", "Back cap")
+    # A transmitted ray may also be glossy. Restrict this bypass to reflections
+    # so real wall refraction continues through subsequent interfaces.
+    reflected = math_node("MULTIPLY", "Reflected glossy ray")
+    bypass = math_node("MAXIMUM", "Suppress repeated reflections")
+    result = node("ShaderNodeMixShader", "Visible glass")
+
+    link = tree.links.new
+    link(geometry.outputs["True Normal"], normal.inputs["Vector"])
+    link(normal.outputs["Vector"], separate.inputs["Vector"])
+    link(separate.outputs["Z"], absolute_z.inputs[0])
+    link(absolute_z.outputs[0], wall.inputs[0])
+    link(geometry.outputs["True Normal"], fresnel.inputs["Normal"])
+    link(geometry.outputs["True Normal"], glossy.inputs["Normal"])
+    link(path.outputs["Is Camera Ray"], camera_sheen.inputs[0])
+    link(camera_sheen.outputs[0], studio.inputs["Strength"])
+    link(glossy.outputs[0], reflection_sum.inputs[0])
+    link(studio.outputs[0], reflection_sum.inputs[1])
+    link(fresnel.outputs[0], cap_glass.inputs[0])
+    link(transparent.outputs[0], cap_glass.inputs[1])
+    link(reflection_sum.outputs[0], cap_glass.inputs[2])
+    link(wall.outputs[0], shell.inputs[0])
+    link(cap_glass.outputs[0], shell.inputs[1])
+    link(bsdf.outputs["BSDF"], shell.inputs[2])
+    link(wall.outputs[0], cap.inputs[1])
+    link(cap.outputs[0], back_cap.inputs[0])
+    link(geometry.outputs["Backfacing"], back_cap.inputs[1])
+    link(path.outputs["Is Glossy Ray"], reflected.inputs[0])
+    link(path.outputs["Is Reflection Ray"], reflected.inputs[1])
+    link(back_cap.outputs[0], bypass.inputs[0])
+    link(reflected.outputs[0], bypass.inputs[1])
+    link(bypass.outputs[0], result.inputs[0])
+    link(shell.outputs[0], result.inputs[1])
+    link(transparent.outputs[0], result.inputs[2])
+    link(result.outputs[0], output.inputs["Surface"])
+
+    frame = node("NodeFrame", "Neutral glass — clear caps and refractive opening walls")
+    for index, item in enumerate([n for n in tree.nodes if n.get("aim_presentation_glass") and n != frame]):
+        item.parent = frame
+        item.location = (220 * (index // 4), -190 * (index % 4))
+    frame.location = (-1700, -300)
+
+
 def apply_color_schema(bpy: Any, color_config: Path) -> int:
     color_schema = load_color_schema(color_config)
     updated = 0
@@ -2410,15 +2519,24 @@ def apply_color_schema(bpy: Any, color_config: Path) -> int:
             continue
 
         for key, value in material_cfg.items():
+            if key == "Presentation Glass":
+                if layer_name != CLADDING_LAYER:
+                    raise ValueError("Presentation Glass is supported only for CLADDING_RENDER")
+                continue
             set_bsdf_input(bsdf, material, key, value)
+        if layer_name == CLADDING_LAYER:
+            apply_cladding_presentation_glass(material, bsdf, material_cfg)
 
         alpha = material_cfg.get("Alpha")
         base_color = material_cfg.get("Base Color")
         if alpha is None and isinstance(base_color, list) and len(base_color) > 3:
             alpha = base_color[3]
         if isinstance(alpha, (int, float)) and alpha < 1.0:
-            material.blend_method = "BLEND"
-            material.use_screen_refraction = True
+            # Blender 4.2+ removed these Eevee properties; Cycles uses the nodes.
+            if hasattr(material, "blend_method"):
+                material.blend_method = "BLEND"
+            if hasattr(material, "use_screen_refraction"):
+                material.use_screen_refraction = True
 
         updated += 1
 
