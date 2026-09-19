@@ -91,6 +91,18 @@
         "*/runs/*/request.json"
       ],
       "reason": "manual-only"
+    },
+    {
+      "root": ".local/runs",
+      "include": [
+        "*/*.py",
+        "*/comparison.md",
+        "*/experiment.json",
+        "*/build-command.json",
+        "*/previous-clear-realistic.yaml",
+        "*/baseline-colors/*.yaml"
+      ],
+      "reason": "manual-only"
     }
   ]
 }
