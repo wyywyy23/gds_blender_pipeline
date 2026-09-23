@@ -1,5 +1,22 @@
 # GDS Studio · GDS Blender Pipeline
 
+
+## Private setup dependency bundle
+
+The versioned `gds-studio-aim-inputs` package contains the required private setup inputs.
+Its exact file list and setup steps are declared in [.facultyos/setup-bundles/gds-studio-aim-inputs.json](.facultyos/setup-bundles/gds-studio-aim-inputs.json).
+Obtain the ZIP and registration receipt from the authorized OneDrive package store,
+verify its SHA-256, extract `restore.py`, and run:
+
+```sh
+python3 restore.py restore --archive gds-studio-aim-inputs-2026.09.23.1.zip --sha256 <registered-sha256> --destination /path/to/workspace --apply
+```
+
+FacultyOS Sync restores the same package automatically on managed machines.
+Standalone restoration needs only Python; continue with the normal setup below.
+Existing different files are preserved. Only authorized collaborators with the required
+vendor access may receive these private inputs. Usage history and outputs are excluded.
+
 A local web app for turning GDS layouts into Blender scenes and reproducible renders.
 Import a raw GDS, reuse or generate its visual GDS, and choose your camera angle in
 an interactive 3D preview **before** building a scene.

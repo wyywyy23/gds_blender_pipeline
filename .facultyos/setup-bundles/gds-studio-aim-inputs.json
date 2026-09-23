@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "id": "gds-studio-aim-inputs",
+  "version": "2026.09.23.1",
+  "title": "GDS Studio AIM setup inputs",
+  "purpose": "tool-setup",
+  "access": "authorized-collaborators-only",
+  "repository_id": "R-20260902-145808-7CDF",
+  "repository_remote": "git@github.com:wyywyy23/gds_blender_pipeline.git",
+  "source_commit": "5523b81d6a93a4eeb4c9e693ab4531c3f8035449",
+  "archive_path": ".facultyos/bundles/gds-studio-aim-inputs-2026.09.23.1.zip",
+  "members": [
+    {
+      "path": "external_pdks/AIMPhotonics_ACT1/tech.py",
+      "kind": "required-input",
+      "reason": "AIM layer definitions consumed by pipeline AST parsing.",
+      "sha256": "d00093f678c90f3de98916e7ace24a209fc8e9fd17708e83db629c2c918b84ee",
+      "size_bytes": 5625
+    },
+    {
+      "path": "configs/aim/raw_custom_layers.yaml",
+      "kind": "required-input",
+      "reason": "Required custom raw layer mapping.",
+      "sha256": "58159cc8cbd5699166c1a3b479d427545f4ade8be08eaa399021ba04c9d3ab89",
+      "size_bytes": 657
+    },
+    {
+      "path": "configs/aim/doping_rules.yaml",
+      "kind": "required-input",
+      "reason": "Required doping preprocessing rules.",
+      "sha256": "198169c34efd49984140e164cf78411f8ceb3f66e3ec332f631ac619e8e39011",
+      "size_bytes": 7849
+    },
+    {
+      "path": "configs/aim/render_layers.static.yaml",
+      "kind": "required-input",
+      "reason": "Required static render stack.",
+      "sha256": "6ef33b95f214347f2f8256120cd7f134cea578738b98e4b4bca53f510d4df63d",
+      "size_bytes": 9616
+    }
+  ],
+  "setup": "Use a checkout containing source commit 5523b81d6a93a4eeb4c9e693ab4531c3f8035449. Install Python 3.11+, Node.js/npm and Blender with GDSII Importer for rendering. Run python3 scripts/setup_webapp.py, then python3 scripts/start_webapp.py. The restored inputs occupy the documented default paths for both CLI and Local setup. Select your own raw GDS. See docs/web-app.md. No layout history, personal presets, Makefile.local, absolute device paths or outputs are included."
+}

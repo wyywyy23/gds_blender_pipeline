@@ -60,3 +60,6 @@ temp/
 
 # Private workflows, saved inputs and generated local state
 /.local/
+
+# Versioned private setup dependency bundles
+/.facultyos/bundles/

@@ -103,6 +103,13 @@
         "*/baseline-colors/*.yaml"
       ],
       "reason": "manual-only"
+    },
+    {
+      "root": ".facultyos/bundles",
+      "include": [
+        "*.zip"
+      ],
+      "reason": "manual-only"
     }
   ]
 }
