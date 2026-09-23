@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "id": "gds-studio-aim-inputs",
-  "version": "2026.09.23.1",
+  "version": "2026.09.23.2",
   "title": "GDS Studio AIM setup inputs",
   "purpose": "tool-setup",
   "access": "authorized-collaborators-only",
   "repository_id": "R-20260902-145808-7CDF",
   "repository_remote": "git@github.com:wyywyy23/gds_blender_pipeline.git",
-  "source_commit": "5523b81d6a93a4eeb4c9e693ab4531c3f8035449",
-  "archive_path": ".facultyos/bundles/gds-studio-aim-inputs-2026.09.23.1.zip",
+  "source_commit": "15d57981afc9940404e7ca0fc0f380a962682476",
+  "archive_path": ".facultyos/bundles/gds-studio-aim-inputs-2026.09.23.2.zip",
   "members": [
     {
       "path": "external_pdks/AIMPhotonics_ACT1/tech.py",
@@ -37,7 +37,21 @@
       "reason": "Required static render stack.",
       "sha256": "6ef33b95f214347f2f8256120cd7f134cea578738b98e4b4bca53f510d4df63d",
       "size_bytes": 9616
+    },
+    {
+      "path": "configs/finishing/aim_fill_cheese.json",
+      "kind": "git-context",
+      "reason": "Canonical profile for the optional ONE Lab fill/cheese preprocessing stage.",
+      "sha256": "5426a83b6d5ef7db7e924119a59e19b320a69a1ffc72988ce56a831549e97972",
+      "size_bytes": 5775
+    },
+    {
+      "path": "configs/finishing/aim_diam_rules.json",
+      "kind": "git-context",
+      "reason": "Canonical profile for the optional ONE Lab fill/cheese preprocessing stage.",
+      "sha256": "ab3f0daa5e8ad88757f74b9af0274cdd3d7d049706a716de876d84c13e52a04b",
+      "size_bytes": 2405
     }
   ],
-  "setup": "Use a checkout containing source commit 5523b81d6a93a4eeb4c9e693ab4531c3f8035449. Install Python 3.11+, Node.js/npm and Blender with GDSII Importer for rendering. Run python3 scripts/setup_webapp.py, then python3 scripts/start_webapp.py. The restored inputs occupy the documented default paths for both CLI and Local setup. Select your own raw GDS. See docs/web-app.md. No layout history, personal presets, Makefile.local, absolute device paths or outputs are included."
+  "setup": "Use a checkout containing software commit 15d57981afc9940404e7ca0fc0f380a962682476 or a compatible descendant. Install Python3.11+, Node.js/npm and Blender with GDSII Importer for rendering. Run python3 scripts/setup_webapp.py, then python3 scripts/start_webapp.py. The four AIM inputs restore to their documented default paths; two matching configs/finishing profiles support optional fill/cheese, disabled by default. See docs/web-app.md for staged visual, scene, preset and preview controls. The ZIP supplements software and contains no layout history, personal presets, local configuration, absolute device paths or generated output. Preserve different existing files; use a clean matching checkout for restoration."
 }

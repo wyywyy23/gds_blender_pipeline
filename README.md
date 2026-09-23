@@ -9,7 +9,7 @@ Obtain the ZIP and registration receipt from the authorized OneDrive package sto
 verify its SHA-256, extract `restore.py`, and run:
 
 ```sh
-python3 restore.py restore --archive gds-studio-aim-inputs-2026.09.23.1.zip --sha256 <registered-sha256> --destination /path/to/workspace --apply
+python3 restore.py restore --archive gds-studio-aim-inputs-2026.09.23.2.zip --sha256 <registered-sha256> --destination /path/to/workspace --apply
 ```
 
 FacultyOS Sync restores the same package automatically on managed machines.
@@ -123,3 +123,5 @@ renders, geometry diagnostics and HPC use. See [Advanced usage](docs/advanced-us
 App results live under the named layout directory shown in **Layout library**. Earlier
 app jobs remain in `.local/webapp/jobs/` and appear as legacy history when their raw
 checksum matches the selected layout. CLI outputs retain `.local/runs/<design>/`.
+
+Setup package `2026.09.23.2` pairs with software commit `15d57981afc9940404e7ca0fc0f380a962682476` and compatible descendants. It includes the four private AIM inputs and two matching editable finishing profiles; the software and render environment follow the setup instructions above.
