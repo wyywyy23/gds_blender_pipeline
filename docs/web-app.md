@@ -111,6 +111,79 @@ covered by the manifest. The checkbox is cleared after the new preview loads. Th
 preview and Blender build both consume the exact same generated visual GDS, including
 its selected XY rounding. Only browser mesh tessellation is simplified separately.
 
+XY rounding is adaptive in both Studio and the command-line pipeline. The metal
+radius remains **0.20 µm** and the contact/via radius **0.10 µm** by default; these
+values are upper limits. Each connected shape first uses the selected radius.
+If rounding would erase or split that shape, change its holes, or join neighbours,
+only affected shapes retry with smaller radii. Shapes too small for safe rounding
+at GDS grid resolution retain their original contours. Zero still disables rounding.
+The preprocessing log reports the effective radius range and affected shape count.
+
+The visual extent also follows dicing trenches automatically. When merged **DIAM**
+forms closed trenches enclosing all raw layout geometry, the substrate footprint
+ends at their **outer contours**, with no extra bbox margin. Cladding and etchable
+substrate still have DIAM removed, and generated layers stay inside those outer
+contours. Nonrectangular contours and multiple enclosed chips are retained. If DIAM
+is absent, open, or only surrounds part of the layout, the full layout bbox is
+expanded by the configured margin (10 µm per edge by default). CLI `--bbox-margin`
+overrides only this fallback. Studio and CLI use the same rule; existing visuals
+are regenerated into a new revision when the preprocessing code changes.
+
+## Controls by workflow stage
+
+The upper-left **Visual GDS** section contains fill cheese, TUAM undercut, PAAM
+opening, both adaptive XY radii and the advanced GDS fracture limit. Changing any
+of these requires **Refresh visual GDS & preview** before building.
+
+The lower-left **Build scene** section contains the color scheme, metal cap bevel,
+cladding geometry, vertical scale and object merging. Change these and build again
+using the checked visual. Vertical scale updates the browser model immediately.
+
+The right side holds the preset, camera, surface optics, output dimensions, render
+quality and layer visibility. Builds save these together in the render preset.
+Each Defaults button resets only its own section. Preview detail lives next to the
+viewport; **Refresh preview** applies it without blocking a full-detail scene build.
+
+## Optional fill and cheese
+
+Enable **Visual GDS → Geometry → Fill cheese**, then refresh the visual preview. It defaults to
+off. When enabled, the shared preprocessor adds ONE Lab dummy fill and metal cheese
+holes to the original raw geometry before silicon/doping conversion and adaptive
+XY rounding. The original raw GDS stays unchanged. Both the browser and Blender
+consume the resulting visual revision; browser simplification never changes its
+full-detail fill or holes. Loading an older preset without this option turns it off.
+
+The editable profile is `configs/finishing/aim_fill_cheese.json`, adapted from the
+ONE Lab layout implementation. It retains aligned horizontal dot/capsule fill on
+SEAM/FNAM/SNAM, aligned M1/M2 squares, ML squares, independent BFILL/BCHE masks,
+original-waveguide keepout, round clearances, via and metal-edge protection, TUAM
+clearance, global device keepouts on 802/803/804 for both fill and cheese (sharing the
+7 µm waveguide clearance), and
+per-layer DIAM minima. Fill and holes must fit whole inside the original
+layout bbox and allowed regions; the existing DIAM/expanded-bbox rule still determines
+the visual substrate extent. TUAM is preserved and fill is computed from the unfilled
+source each time. No undercut repair is performed against new fill.
+
+This is the same photo-informed visualization model as ONE Lab, with its approximate
+width trigger and candidate limit; it is not a foundry density/signoff deck. A budget
+error is explicit and does not silently lower full-detail geometry. Profile/rule or
+engine changes invalidate enabled visuals; toggling the option can reuse an existing
+matching revision. Camera and preview-quality changes remain independent.
+
+CLI: add `--fill-cheese` to `scripts/aim_preprocess_gds.py`; optionally provide
+`--fill-cheese-config profile.json`. With Make, use `make aim-build GDS=... FILL_CHEESE=1`
+or `make aim-preprocess ... AIM_PREPROCESS_FILL_CHEESE=1`. The staged Make workflow
+uses a `.fill-cheese` filename suffix to distinguish the output.
+
+The standalone adapter uses the pipeline's existing dependencies, with no onelab
+checkout/runtime dependency. Reference: onelab-layout working snapshot over
+`28970731221029ff4048616951db01237957f1e5`, read on 2026-09-23:
+
+- `src/onelab/finishing.py`: `61da5be66d4a6e8dd086d600ca6c171075290b2e8faaf02b978a4cafce85dbaf`
+- `src/onelab/_geometry.py`: `80c4ce7f9476a91ed428dd85df6fd3dcfc6e6878c7c4e12e0ba11f337bbfd199`
+- `config/aim_fill_cheese.json`: `5426a83b6d5ef7db7e924119a59e19b320a69a1ffc72988ce56a831549e97972`
+- `config/aim_diam_rules.json`: `ab3f0daa5e8ad88757f74b9af0274cdd3d7d049706a716de876d84c13e52a04b`
+
 ## Compose before building
 
 New sessions and **Defaults** start at **3200 × 2000 pixels** with **1024 Cycles
@@ -163,15 +236,22 @@ these defaults.
    copy of its saved library preset. `request.json` and the job record identify that
    exact preset path and hash separately from the preset originally loaded for editing.
 
-The preview approximates shapes and composition. It omits optical materials,
-shader bevels and 3D cladding cutter booleans; mesh simplification may reduce XY detail. Transparent cladding
-can be hidden to inspect internal layers. Geometric simplification is controlled
-separately from final output. The default triangle budget is 1,000,000, sufficient
-for the complete TX checkered layout at the default 0.05 µm simplification
-(688,460 triangles in the validated layout). The budget remains adjustable in **Performance**, up
-to 2,000,000. Raising it preserves detail; it does not change final output.
-A triangle-budget error identifies the active limit and layer; the app never
-silently discards polygons to fit a budget.
+The preview automatically adjusts its detail to fit the **Preview triangle budget**
+(default 1,000,000, adjustable up to 2,000,000). **Preview simplification start**
+(default 0.05 µm) is the starting tolerance. When needed, Studio increases it while
+preserving connected shapes and holes. If tiny disconnected structures still exceed
+the budget, the smallest footprints keep their outlines as flat top surfaces in the
+preview. Every component and layer remains represented; an impossibly small budget
+still produces an explicit error rather than dropping shapes.
+
+The note beneath the viewer reports the actual tolerance and any flat small shapes.
+These adjustments happen automatically for future layouts and are used only to make
+the browser preview responsive. Original layout bounds stay fixed for camera framing.
+They do not rewrite the visual GDS, lower final render resolution/samples, or change
+Blender's full-detail geometry, materials or bevels. Preview-only changes reuse the
+same checked visual and require no new preprocessing. The preview omits optical
+materials, shader bevels, depth-of-field blur and 3D cladding cutter booleans; inspect
+those effects in Blender. Transparent cladding can be hidden to inspect internal layers.
 
 ## Layout library and output
 

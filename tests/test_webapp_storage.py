@@ -24,6 +24,10 @@ class LibraryTests(unittest.TestCase):
         (self.root/'scripts').mkdir();(self.root/'webapp').mkdir()
         for name in PREPROCESS_SCRIPTS:(self.root/'scripts'/name).write_text('# preprocessing\n')
         (self.root/'webapp/pipeline.py').write_text('# pipeline\n')
+        (self.root/'configs/finishing').mkdir(parents=True)
+        for name in ('aim_fill_cheese.json','aim_diam_rules.json'):
+            shutil.copyfile(ROOT/'configs/finishing'/name,self.root/'configs/finishing'/name)
+        shutil.copyfile(ROOT/'scripts/aim_fill_cheese.py',self.root/'scripts/aim_fill_cheese.py')
         self.source=self.workspace/'Chip Raw.GDS';self.gds(self.source)
         self.library=Library(self.root);self.layout=self.library.import_raw(self.source)
         self.opts=pipeline.options({});self.cfg={'python':sys.executable,'blender':sys.executable,'gds':str(self.library.raw(self.layout))}
@@ -88,6 +92,31 @@ class LibraryTests(unittest.TestCase):
         recipe=self.library.recipe(self.layout,self.cfg,altered)
         self.assertEqual(self.library.check_visual(self.layout,recipe)['visual']['id'],visual['id'])
         self.assertEqual(self.library.check_visual(self.layout,recipe)['state'],'ready')
+
+    def test_fill_cheese_has_separate_visual_identity_and_restores_unfilled_cache(self):
+        plain=self.ready_visual()
+        original=read_json(self.library.visual_dir(self.layout,plain['id'])/'manifest.json')
+        self.opts=pipeline.options({'fill_cheese':True})
+        filled_recipe=self.library.recipe(self.layout,self.cfg,self.opts)
+        self.assertEqual(self.library.check_visual(self.layout,filled_recipe)['state'],'stale')
+        filled=self.ready_visual()
+        self.assertNotEqual(plain['id'],filled['id'])
+        self.assertEqual(self.library.check_visual(self.layout,filled_recipe)['visual']['id'],filled['id'])
+        plain_recipe=self.library.recipe(self.layout,self.cfg,pipeline.options({}))
+        self.assertEqual(self.library.check_visual(self.layout,plain_recipe)['visual']['id'],plain['id'])
+        self.assertEqual(read_json(self.library.visual_dir(self.layout,plain['id'])/'manifest.json'),original)
+        preset=pipeline.preset('filled',CAMERA,self.opts,[])
+        self.assertTrue(preset['webapp']['options']['fill_cheese'])
+
+    def test_fill_profiles_and_engine_invalidate_only_enabled_visuals(self):
+        plain=self.library.recipe(self.layout,self.cfg,self.opts)
+        self.opts=pipeline.options({'fill_cheese':True})
+        for path in ('configs/finishing/aim_fill_cheese.json','configs/finishing/aim_diam_rules.json','scripts/aim_fill_cheese.py'):
+            with self.subTest(path=path):
+                filled=self.library.recipe(self.layout,self.cfg,self.opts)
+                target=self.root/path;target.write_text(target.read_text()+'\n')
+                self.assertNotEqual(self.library.recipe(self.layout,self.cfg,self.opts),filled)
+                self.assertEqual(self.library.recipe(self.layout,self.cfg,pipeline.options({})),plain)
 
     def legacy_visual(self, relocated=False):
         value=self.ready_visual();directory=self.library.visual_dir(self.layout,value['id'])

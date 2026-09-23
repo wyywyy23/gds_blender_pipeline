@@ -36,6 +36,7 @@ AIM_BLENDER_CLADDING_EXPLICIT_MESH ?=
 AIM_BLENDER_CLADDING_EXPLICIT_CHUNK_SIZE_UM ?= 0
 AIM_BLENDER_APPLY_CLADDING_BOOLEAN ?= 1
 AIM_PREPROCESS_MAX_POLYGON_VERTICES ?= 256
+AIM_PREPROCESS_FILL_CHEESE ?= 0
 AIM_PREPROCESS_UNDERCUT ?= 1
 AIM_PREPROCESS_PASSIVATION_OPENING ?= 1
 AIM_PREPROCESS_MIN_Z ?=
@@ -58,12 +59,14 @@ PRESET ?=
 SCHEME ?= realistic
 UNDERCUT ?= 1
 PASSIVATION_OPENING ?= 1
+FILL_CHEESE ?= $(AIM_PREPROCESS_FILL_CHEESE)
 AIM_RUN_ROOT ?= .local/runs
 AIM_RUN_NAME = $(basename $(notdir $(GDS)))
 AIM_RUN_DIR = $(AIM_RUN_ROOT)/$(AIM_RUN_NAME)
 AIM_RUN_UNDERCUT_SUFFIX = $(if $(filter 0 false no,$(UNDERCUT)),.no-undercut)
 AIM_RUN_PASSIVATION_SUFFIX = $(if $(filter 0 false no,$(PASSIVATION_OPENING)),.no-passivation-opening)
-AIM_RUN_VARIANT_SUFFIX = $(AIM_RUN_UNDERCUT_SUFFIX)$(AIM_RUN_PASSIVATION_SUFFIX)
+AIM_RUN_FILL_CHEESE_SUFFIX = $(if $(filter 1 true yes,$(FILL_CHEESE)),.fill-cheese)
+AIM_RUN_VARIANT_SUFFIX = $(AIM_RUN_UNDERCUT_SUFFIX)$(AIM_RUN_PASSIVATION_SUFFIX)$(AIM_RUN_FILL_CHEESE_SUFFIX)
 AIM_RUN_VISUAL_GDS = $(AIM_RUN_DIR)/visual/$(AIM_RUN_NAME)$(AIM_RUN_VARIANT_SUFFIX).visual.gds
 AIM_RUN_BASE_BLEND = $(AIM_RUN_DIR)/blender/$(AIM_RUN_NAME)$(AIM_RUN_VARIANT_SUFFIX).blend
 AIM_RUN_SCHEME_CONFIG = $(AIM_BLENDER_COLOR_DIR)/$(SCHEME).yaml
@@ -94,6 +97,7 @@ aim-build:
 	@test -n "$(strip $(GDS))" || { echo "Usage: make aim-build GDS=path/to/input.gds"; exit 2; }
 	@test -f "$(GDS)" || { echo "GDS file not found: $(GDS)"; exit 2; }
 	@test -f "$(AIM_RUN_SCHEME_CONFIG)" || { echo "Color scheme not found: $(AIM_RUN_SCHEME_CONFIG)"; exit 2; }
+	@case "$(FILL_CHEESE)" in 1|true|yes|0|false|no) ;; *) echo "FILL_CHEESE must be 0 or 1"; exit 2;; esac
 	@case "$(UNDERCUT)" in 1|true|yes|0|false|no) ;; *) echo "UNDERCUT must be 0 or 1"; exit 2;; esac
 	@case "$(PASSIVATION_OPENING)" in 1|true|yes|0|false|no) ;; *) echo "PASSIVATION_OPENING must be 0 or 1"; exit 2;; esac
 	@case "$(AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED)" in 1|true|yes|0|false|no) ;; *) echo "AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED must be 0 or 1"; exit 2;; esac
@@ -106,6 +110,7 @@ aim-build:
 		AIM_PREPROCESS_MAX_POLYGON_VERTICES="$(AIM_PREPROCESS_MAX_POLYGON_VERTICES)" \
 		AIM_PREPROCESS_METAL_XY_FILLET_WIDTH_UM="$(AIM_PREPROCESS_METAL_XY_FILLET_WIDTH_UM)" \
 		AIM_PREPROCESS_CONTACT_VIA_XY_FILLET_WIDTH_UM="$(AIM_PREPROCESS_CONTACT_VIA_XY_FILLET_WIDTH_UM)" \
+		AIM_PREPROCESS_FILL_CHEESE="$(FILL_CHEESE)" \
 		AIM_PREPROCESS_UNDERCUT="$(UNDERCUT)" \
 		AIM_PREPROCESS_PASSIVATION_OPENING="$(PASSIVATION_OPENING)" \
 		AIM_PREPROCESS_MIN_Z="$(AIM_PREPROCESS_MIN_Z)" \
@@ -203,6 +208,7 @@ aim-preprocess:
 	@test -n "$(strip $(AIM_GDS))" || { echo "AIM_GDS is required"; exit 2; }
 	@test -n "$(strip $(AIM_VISUAL_GDS))" || { echo "AIM_VISUAL_GDS is required"; exit 2; }
 	@test -f "$(AIM_GDS)" || { echo "GDS file not found: $(AIM_GDS)"; exit 2; }
+	@case "$(AIM_PREPROCESS_FILL_CHEESE)" in 1|true|yes|0|false|no) ;; *) echo "AIM_PREPROCESS_FILL_CHEESE must be 0 or 1"; exit 2;; esac
 	@case "$(AIM_PREPROCESS_UNDERCUT)" in 1|true|yes|0|false|no) ;; *) echo "AIM_PREPROCESS_UNDERCUT must be 0 or 1"; exit 2;; esac
 	@case "$(AIM_PREPROCESS_PASSIVATION_OPENING)" in 1|true|yes|0|false|no) ;; *) echo "AIM_PREPROCESS_PASSIVATION_OPENING must be 0 or 1"; exit 2;; esac
 	+$(MAKE) aim-registry aim-blendergds-config
@@ -215,6 +221,7 @@ aim-preprocess:
 		--presentation-contact-via-xy-fillet-width-um "$(AIM_PREPROCESS_CONTACT_VIA_XY_FILLET_WIDTH_UM)" \
 		$(if $(filter-out 0,$(strip $(AIM_PREPROCESS_MAX_POLYGON_VERTICES))),--max-polygon-vertices "$(AIM_PREPROCESS_MAX_POLYGON_VERTICES)") \
 		$(if $(strip $(AIM_PREPROCESS_MIN_Z)),--min-export-z "$(AIM_PREPROCESS_MIN_Z)") \
+		$(if $(filter 1 true yes,$(AIM_PREPROCESS_FILL_CHEESE)),--fill-cheese) \
 		$(if $(filter 0 false no,$(AIM_PREPROCESS_UNDERCUT)),--no-undercut) \
 		$(if $(filter 0 false no,$(AIM_PREPROCESS_PASSIVATION_OPENING)),--no-passivation-opening)
 
@@ -237,6 +244,7 @@ aim-build-scene:
 		AIM_PREPROCESS_METAL_XY_FILLET_WIDTH_UM="$(AIM_PREPROCESS_METAL_XY_FILLET_WIDTH_UM)" \
 		AIM_PREPROCESS_CONTACT_VIA_XY_FILLET_WIDTH_UM="$(AIM_PREPROCESS_CONTACT_VIA_XY_FILLET_WIDTH_UM)" \
 		AIM_PREPROCESS_MAX_POLYGON_VERTICES="$(AIM_PREPROCESS_MAX_POLYGON_VERTICES)" \
+		AIM_PREPROCESS_FILL_CHEESE="$(AIM_PREPROCESS_FILL_CHEESE)" \
 		AIM_PREPROCESS_UNDERCUT="$(AIM_PREPROCESS_UNDERCUT)" \
 		AIM_PREPROCESS_PASSIVATION_OPENING="$(AIM_PREPROCESS_PASSIVATION_OPENING)" \
 		AIM_PREPROCESS_MIN_Z="$(AIM_PREPROCESS_MIN_Z)"

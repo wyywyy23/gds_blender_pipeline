@@ -64,6 +64,22 @@ class ContactViaVisualGdsRoundingTests(unittest.TestCase):
         )
         self.assertEqual(region_topology(rounded), (1, 0))
 
+    def test_tiny_contacts_and_vias_adapt_without_changing_the_group_default(self) -> None:
+        source = kdb.Region(kdb.Box(0, 0, 150, 150))
+        for name in ("CBAM_RENDER", "V1AM_RENDER", "VAAM_RENDER"):
+            radius = presentation_xy_fillet_radius_for_layer(
+                name, metal_radius_um=0.2, contact_via_radius_um=0.1
+            )
+            rounded, stats = round_xy_region_preserving_topology(
+                source, radius_um=radius, dbu=self.DBU,
+                region_name=name, tolerance=32,
+            )
+            self.assertEqual(radius, 0.1)
+            self.assertEqual(region_topology(rounded), (1, 0))
+            self.assertEqual(stats["adapted_components"], 1)
+            self.assertEqual(stats["max_radius_um"], 0.05)
+            self.assertGreater((source ^ rounded).area(), 0)
+
     def test_rejects_negative_group_radius(self) -> None:
         with self.assertRaisesRegex(ValueError, r"Contact/via XY rounding"):
             presentation_xy_fillet_radius_for_layer(

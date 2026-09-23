@@ -17,27 +17,28 @@ FILES = {
 }
 # Geometry defaults mirror the production Makefile; Studio uses higher-quality render defaults.
 OPTIONS = [
-    dict(key='scheme', label='Color scheme', group='Appearance', default='realistic', choices=['realistic','fancy','marketing']),
-    dict(key='iridescence', label='Adaptive iridescence (final render)', group='Appearance', default=False),
-    dict(key='iridescence_strength', label='Iridescence strength', group='Appearance', default=0.85, min=0, max=1, step=0.05),
-    dict(key='metal_bevel', label='Metal cap Z bevel', group='Appearance', default=True),
-    dict(key='bevel_width', label='Cap bevel width (µm)', group='Appearance', default=0.05, min=0, max=5, step=0.01),
-    dict(key='metal_fillet', label='Metal XY rounding (µm)', group='Appearance', default=0.20, min=0, max=10, step=0.05),
-    dict(key='via_fillet', label='Contact / via XY rounding (µm)', group='Appearance', default=0.10, min=0, max=10, step=0.05),
-    dict(key='undercut', label='TUAM undercut', group='Geometry', default=True),
-    dict(key='passivation', label='PAAM opening', group='Geometry', default=True),
-    dict(key='cladding', label='Cladding geometry', group='Geometry', default='boolean', choices=['boolean','solid']),
-    dict(key='z_scale', label='Vertical scale', group='Geometry', default=1.0, min=0.01, max=100, step=0.1),
-    dict(key='denoise', label='Denoise', group='Render', default=True),
-    dict(key='transparent', label='Transparent background', group='Render', default=False),
-    dict(key='width', label='Image width', group='Render', default=3200, min=64, max=8192, step=1),
-    dict(key='height', label='Image height', group='Render', default=2000, min=64, max=8192, step=1),
-    dict(key='samples', label='Cycles samples', group='Performance', default=1024, min=1, max=16384, step=1),
-    dict(key='adaptive_sampling', label='Adaptive sampling', group='Performance', default=True),
-    dict(key='merge_layers', label='Merge objects per layer', group='Performance', default=False),
-    dict(key='max_vertices', label='GDS fracture vertex limit', group='Performance', default=256, min=4, max=8190, step=1),
-    dict(key='preview_tolerance', label='Preview simplification (µm)', group='Performance', default=0.05, min=0, max=20, step=0.01),
-    dict(key='preview_limit', label='Preview triangle budget', group='Performance', default=1000000, min=1000, max=2000000, step=1),
+    dict(key='scheme', label='Color scheme', group='Materials', stage='scene', default='realistic', choices=['realistic','fancy','marketing']),
+    dict(key='iridescence', label='Adaptive iridescence (final render)', group='Surface optics', stage='preset', default=False),
+    dict(key='iridescence_strength', label='Iridescence strength', group='Surface optics', stage='preset', default=0.85, min=0, max=1, step=0.05),
+    dict(key='metal_bevel', label='Metal cap Z bevel', group='Materials', stage='scene', default=True),
+    dict(key='bevel_width', label='Cap bevel width (µm)', group='Materials', stage='scene', default=0.05, min=0, max=5, step=0.01),
+    dict(key='metal_fillet', label='Metal XY rounding max (µm, adaptive)', group='Geometry', stage='visual', default=0.20, min=0, max=10, step=0.05),
+    dict(key='via_fillet', label='Contact / via XY rounding max (µm, adaptive)', group='Geometry', stage='visual', default=0.10, min=0, max=10, step=0.05),
+    dict(key='fill_cheese', label='Fill cheese', group='Geometry', stage='visual', default=False),
+    dict(key='undercut', label='TUAM undercut', group='Geometry', stage='visual', default=True),
+    dict(key='passivation', label='PAAM opening', group='Geometry', stage='visual', default=True),
+    dict(key='cladding', label='Cladding geometry', group='Geometry', stage='scene', default='boolean', choices=['boolean','solid']),
+    dict(key='z_scale', label='Vertical scale', group='Geometry', stage='scene', default=1.0, min=0.01, max=100, step=0.1),
+    dict(key='denoise', label='Denoise', group='Quality', stage='preset', default=True),
+    dict(key='transparent', label='Transparent background', group='Output', stage='preset', default=False),
+    dict(key='width', label='Image width', group='Output', stage='preset', default=3200, min=64, max=8192, step=1),
+    dict(key='height', label='Image height', group='Output', stage='preset', default=2000, min=64, max=8192, step=1),
+    dict(key='samples', label='Cycles samples', group='Quality', stage='preset', default=1024, min=1, max=16384, step=1),
+    dict(key='adaptive_sampling', label='Adaptive sampling', group='Quality', stage='preset', default=True),
+    dict(key='merge_layers', label='Merge objects per layer', group='Geometry', stage='scene', default=False),
+    dict(key='max_vertices', label='GDS fracture vertex limit', group='Advanced', stage='visual', default=256, min=4, max=8190, step=1),
+    dict(key='preview_tolerance', label='Preview simplification start (µm, auto)', group='Preview quality', stage='preview', default=0.05, min=0, max=20, step=0.01),
+    dict(key='preview_limit', label='Preview triangle budget', group='Preview quality', stage='preview', default=1000000, min=1000, max=2000000, step=1),
 ]
 DEFAULTS = {x['key']:x['default'] for x in OPTIONS}
 
@@ -115,6 +116,7 @@ def prepare_commands(config, opts, directory, *, preview=False, root=ROOT, visua
         script('aim_generate_blendergds_config.py','--render-layers',p/'layers.yaml','--output',p/'stack.yaml'),
         script('aim_preprocess_gds.py','--input',config['gds'],'--registry',p/'registry.yaml','--output',p/visual_name,'--max-polygon-vertices',opts['max_vertices'],'--presentation-metal-xy-fillet-width-um',opts['metal_fillet'],'--presentation-contact-via-xy-fillet-width-um',opts['via_fillet']),
     ]
+    if opts['fill_cheese']:commands[-1].append('--fill-cheese')
     if not opts['undercut']:commands[-1].append('--no-undercut')
     if not opts['passivation']:commands[-1].append('--no-passivation-opening')
     return commands
@@ -145,49 +147,118 @@ def build_commands(config,opts,directory,root=ROOT,visual_directory=None,visual_
 
 
 def preview_mesh(visual, stack, opts, root=ROOT):
-    import gdstk
-    from shapely import make_valid, constrained_delaunay_triangles, union_all
+    import numpy as np
+    from kfactory import kdb
+    from shapely import constrained_delaunay_triangles, get_num_coordinates, simplify
     from shapely.geometry import Polygon
     from shapely.geometry.polygon import orient
-    library=gdstk.read_gds(str(visual),unit=1e-6)
-    # KLayout writes a zero-area $$$CONTEXT_INFO$$$ metadata cell beside the design.
-    cells=[c for c in library.top_level() if c.bounding_box() is not None and c.bounding_box()[1][0]>c.bounding_box()[0][0] and c.bounding_box()[1][1]>c.bounding_box()[0][1]]
-    if len(cells)!=1:raise ValueError('Select a GDS with exactly one top-level cell')
-    layers=yaml.safe_load(Path(stack).read_text())
-    palettes={name:yaml.safe_load((root/'configs/blender/colors/aim'/f'{name}.yaml').read_text())['layers'] for name in ['realistic','fancy','marketing']}
-    bounds=[[math.inf]*3,[-math.inf]*3];meshes=[];triangles=0
-    def polygons(geom):
-        if geom.geom_type=='Polygon':yield geom
-        elif hasattr(geom,'geoms'):
-            for g in geom.geoms:yield from polygons(g)
-    for name,spec in layers.items():
-        if 'CUTTER' in name or 'CONFLICT' in name: continue
-        raw=cells[0].get_polygons(layer=spec['index'],datatype=spec['type'])
-        if not raw:continue
-        # Union fractured contours before triangulating so holes survive and internal
-        # fracture walls do not appear. Only preview contours are simplified.
-        geom=union_all([make_valid(Polygon(poly.points)) for poly in raw])
-        if opts['preview_tolerance']:geom=geom.simplify(opts['preview_tolerance'],preserve_topology=True)
-        z0=spec['z']*opts['z_scale'];z1=(spec['z']+spec['height'])*opts['z_scale']
-        vertices=[]
-        def tri(a,b,c):
+
+    layout = kdb.Layout()
+    layout.read(str(visual))
+    cells = [cell for cell in layout.top_cells() if cell.bbox().area() > 0]
+    if len(cells) != 1:
+        raise ValueError('Select a GDS with exactly one top-level cell')
+    layers = yaml.safe_load(Path(stack).read_text())
+    palettes = {name: yaml.safe_load((root / 'configs/blender/colors/aim' / f'{name}.yaml').read_text())['layers'] for name in ['realistic', 'fancy', 'marketing']}
+    bounds = [[math.inf] * 3, [-math.inf] * 3]
+    originals = []
+    entries = []
+    # Merge on the exact GDS grid before converting to floating-point preview
+    # contours. This removes fracture seams and avoids a costly floating-point
+    # union over tens of thousands of rounded vias.
+    for name, spec in layers.items():
+        if 'CUTTER' in name or 'CONFLICT' in name:
+            continue
+        region = kdb.Region(cells[0].begin_shapes_rec(layout.layer(spec['index'], spec['type']))).merged(True, 0)
+        if region.is_empty():
+            continue
+        begin = len(originals)
+        for poly in region.each():
+            hull = [(p.x * layout.dbu, p.y * layout.dbu) for p in poly.each_point_hull()]
+            holes = [[(p.x * layout.dbu, p.y * layout.dbu) for p in poly.each_point_hole(i)] for i in range(poly.holes())]
+            originals.append(Polygon(hull, holes))
+        z0 = spec['z'] * opts['z_scale']
+        z1 = (spec['z'] + spec['height']) * opts['z_scale']
+        box = region.bbox()
+        lower = [box.left * layout.dbu, box.bottom * layout.dbu, min(z0, z1)]
+        upper = [box.right * layout.dbu, box.top * layout.dbu, max(z0, z1)]
+        bounds = [[min(bounds[0][i], lower[i]) for i in range(3)], [max(bounds[1][i], upper[i]) for i in range(3)]]
+        entries.append((name, z0, z1, begin, len(originals)))
+    if not originals:
+        raise ValueError('No render geometry found in GDS')
+
+    requested = opts['preview_tolerance']
+    tolerance = requested
+    limit = opts['preview_limit']
+    # Bound contour simplification to a small fraction of the whole layout.
+    # If disconnected microfeatures still dominate, retain their outlines as
+    # top caps instead of erasing them or coarsening the main device indefinitely.
+    span = max(bounds[1][i] - bounds[0][i] for i in (0, 1))
+    maximum = max(requested, layout.dbu, span * 0.001)
+    while True:
+        contours = simplify(originals, tolerance, preserve_topology=True) if tolerance else np.asarray(originals, dtype=object)
+        # A closed extrusion with n boundary vertices and h holes has
+        # 4*n + 4*h - 4 triangles; coordinate counts include ring closures.
+        costs = 4 * get_num_coordinates(contours) - 8
+        predicted = int(costs.sum())
+        if predicted <= limit or tolerance >= maximum:
+            break
+        tolerance = min(maximum, max(layout.dbu, tolerance * 2))
+
+    flat = set()
+    if predicted > limit:
+        # Keep all components, holes and layers. Only the smallest footprints
+        # lose sidewalls/bottoms in the preview; Blender reads the untouched GDS.
+        order = sorted(range(len(contours)), key=lambda i: (originals[i].bounds[2] - originals[i].bounds[0]) * (originals[i].bounds[3] - originals[i].bounds[1]))
+        for index in order:
+            poly = contours[index]
+            cap_cost = len(poly.exterior.coords) - 3 + sum(len(ring.coords) + 1 for ring in poly.interiors)
+            predicted -= int(costs[index]) - cap_cost
+            flat.add(index)
+            if predicted <= limit:
+                break
+    if predicted > limit:
+        raise ValueError(f'Preview budget {limit:,} cannot represent all {len(originals):,} components even as simplified top caps. Increase Preview triangle budget or use a smaller GDS crop. No components were dropped.')
+
+    meshes = []
+    triangles = 0
+    for name, z0, z1, begin, end in entries:
+        vertices = []
+        def tri(a, b, c):
             nonlocal triangles
-            triangles+=1
-            if triangles>opts['preview_limit']:
-                raise ValueError(f"Preview exceeds the {opts['preview_limit']:,}-triangle budget while adding {name}. Increase Preview triangle budget in Performance, increase preview simplification, or use a smaller GDS crop. No geometry was silently dropped.")
-            for point in (a,b,c):
-                vertices.extend(point)
-                for i in range(3):bounds[0][i]=min(bounds[0][i],point[i]);bounds[1][i]=max(bounds[1][i],point[i])
-        for poly in polygons(geom):
-            poly=orient(poly,sign=1)
-            for face in constrained_delaunay_triangles(poly).geoms:
-                pts=list(orient(face,sign=1).exterior.coords)[:3]
-                tri(*[(x,y,z1) for x,y in pts]);tri(*[(x,y,z0) for x,y in reversed(pts)])
-            for ring in [poly.exterior,*poly.interiors]:
-                points=list(ring.coords)
-                for (x,y),(u,v) in zip(points,points[1:]):
-                    tri((x,y,z0),(u,v,z0),(u,v,z1));tri((x,y,z0),(u,v,z1),(x,y,z1))
-        colors={s:pal.get(name,{}).get('Base Color',[0.5,0.6,0.7,1]) for s,pal in palettes.items()}
-        meshes.append(dict(name=name,positions=vertices,colors=colors))
-    if not meshes:raise ValueError('No render geometry found in GDS')
-    return dict(meshes=meshes,bounds=bounds,triangles=triangles,units='µm',notes='Simplified layer extrusion; optical materials, cap bevels and 3D cladding cutter booleans are rendered only in Blender. Depth-of-field blur preview: TODO.')
+            triangles += 1
+            if triangles > limit:
+                raise ValueError('Preview triangulation exceeded its estimated budget; no partial preview was saved')
+            vertices.extend((*a, *b, *c))
+        for index in range(begin, end):
+            poly = orient(contours[index], sign=1)
+            points = list(poly.exterior.coords)[:-1]
+            convex = not poly.interiors and all(
+                (points[(i + 1) % len(points)][0] - p[0]) * (points[(i + 2) % len(points)][1] - points[(i + 1) % len(points)][1])
+                - (points[(i + 1) % len(points)][1] - p[1]) * (points[(i + 2) % len(points)][0] - points[(i + 1) % len(points)][0]) >= 0
+                for i, p in enumerate(points)
+            )
+            # Most contacts/vias are convex: a fan needs no GEOS triangulation.
+            faces = ([points[0], points[i], points[i + 1]] for i in range(1, len(points) - 1)) if convex else (
+                list(orient(face, sign=1).exterior.coords)[:3]
+                for face in constrained_delaunay_triangles(poly).geoms
+            )
+            for face in faces:
+                tri(*[(x, y, z1) for x, y in face])
+                if index not in flat:
+                    tri(*[(x, y, z0) for x, y in reversed(face)])
+            if index not in flat:
+                for ring in [poly.exterior, *poly.interiors]:
+                    points = list(ring.coords)
+                    for (x, y), (u, v) in zip(points, points[1:]):
+                        tri((x, y, z0), (u, v, z0), (u, v, z1))
+                        tri((x, y, z0), (u, v, z1), (x, y, z1))
+        colors = {s: pal.get(name, {}).get('Base Color', [0.5, 0.6, 0.7, 1]) for s, pal in palettes.items()}
+        meshes.append(dict(name=name, positions=vertices, colors=colors))
+    adapted = tolerance > requested or bool(flat)
+    detail = f'Automatic preview detail: {tolerance:g} µm contour tolerance'
+    if flat:
+        detail += f'; {len(flat):,} small shapes shown as flat top surfaces'
+    notes = detail + '. All components and layers are retained. Final Blender rendering uses the full-detail visual GDS and unchanged render quality settings. Optical materials, cap bevels and depth of field are evaluated in Blender.'
+    quality = dict(adapted=adapted, requested_tolerance_um=requested, effective_tolerance_um=tolerance, flat_components=len(flat), components=len(originals), triangle_budget=limit)
+    return dict(meshes=meshes, bounds=bounds, triangles=triangles, units='µm', preview_quality=quality, notes=notes)

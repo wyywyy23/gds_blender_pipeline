@@ -11,7 +11,7 @@ import time
 import uuid
 from pipeline import FILES, file_hash, resolve_file, prepare_commands
 
-PREPROCESS_KEYS = ('metal_fillet', 'via_fillet', 'max_vertices', 'undercut', 'passivation')
+PREPROCESS_KEYS = ('metal_fillet', 'via_fillet', 'max_vertices', 'undercut', 'passivation', 'fill_cheese')
 PREPROCESS_SCRIPTS = ('aim_generate_doping_render_layers.py', 'aim_merge_render_layers.py',
                       'aim_build_layer_registry.py', 'aim_generate_blendergds_config.py', 'aim_preprocess_gds.py')
 VISUAL_FILES = ('doping.yaml', 'layers.yaml', 'registry.yaml', 'stack.yaml')
@@ -216,6 +216,10 @@ class Library:
         self.raw(layout)
         files = {key: file_hash(config[key]) for key in FILES if key != 'gds'}
         scripts = {name: file_hash(self.root / 'scripts' / name) for name in PREPROCESS_SCRIPTS}
+        if opts['fill_cheese']:
+            scripts['aim_fill_cheese.py'] = file_hash(self.root / 'scripts/aim_fill_cheese.py')
+            for name in ('aim_fill_cheese.json', 'aim_diam_rules.json'):
+                files['finishing/' + name] = file_hash(self.root / 'configs/finishing' / name)
         value = dict(format=2, raw_sha256=layout['raw_sha256'], inputs=files, scripts=scripts,
                      plan=preprocessing_plan(opts),
                      options={key: opts[key] for key in PREPROCESS_KEYS}, environment=self.environment(config['python']))

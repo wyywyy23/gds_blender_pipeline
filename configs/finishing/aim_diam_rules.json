@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "source": {
+    "document": "AIM Photonics Active PIC Design Guide",
+    "version": "4.1",
+    "date": "2026-03-20",
+    "package": "AIM ACT v8.1",
+    "sha256": "8a15cc5b5662933bfb44f046561ca56d12c6d8577ef25653a16a99f489d1eccb",
+    "pages": [
+      3,
+      25,
+      26,
+      37,
+      38,
+      39,
+      40,
+      41
+    ]
+  },
+  "diam_layer": [
+    726,
+    727
+  ],
+  "rules": [
+    {
+      "name": "SEAM",
+      "layer": [
+        709,
+        727
+      ],
+      "minimum_clearance": 6,
+      "rule": "GF709g",
+      "page": 25
+    },
+    {
+      "name": "FNAM",
+      "layer": [
+        733,
+        727
+      ],
+      "minimum_clearance": null,
+      "rule": null,
+      "page": 26
+    },
+    {
+      "name": "SNAM",
+      "layer": [
+        735,
+        727
+      ],
+      "minimum_clearance": null,
+      "rule": null,
+      "page": 26
+    },
+    {
+      "name": "M1AM",
+      "layer": [
+        710,
+        727
+      ],
+      "minimum_clearance": 5,
+      "rule": "GF710h",
+      "page": 37
+    },
+    {
+      "name": "M2AM",
+      "layer": [
+        725,
+        727
+      ],
+      "minimum_clearance": 5,
+      "rule": "GF725h",
+      "page": 37
+    },
+    {
+      "name": "M3AM",
+      "layer": [
+        903,
+        727
+      ],
+      "minimum_clearance": 5,
+      "rule": "GF903h",
+      "page": 38
+    },
+    {
+      "name": "M4AM",
+      "layer": [
+        1021,
+        727
+      ],
+      "minimum_clearance": 5,
+      "rule": "GF1021h",
+      "page": 38
+    },
+    {
+      "name": "M5AM",
+      "layer": [
+        1028,
+        727
+      ],
+      "minimum_clearance": 5,
+      "rule": "GF1028h",
+      "page": 39
+    },
+    {
+      "name": "MLAM",
+      "layer": [
+        780,
+        727
+      ],
+      "minimum_clearance": 5,
+      "rule": "GF780h",
+      "page": 40
+    }
+  ],
+  "notes": [
+    "Rule reference, not a tunable visual profile. Update only with verified PDK evidence.",
+    "No positive DIAM spacing is stated for FNAM/SNAM on page26; page3 permits functional nitride edge couplers to extend into DIAM. Null records that distinction, not a foundry zero-spacing rule.",
+    "The simulator keeps dummy fill/cheese outside DIAM on every recipe; the default nitride fill margin is a separate conservative alignment choice.",
+    "GF726d prohibits DIAM intersection with metals, vias and specified contact/metal fill levels (page41)."
+  ]
+}

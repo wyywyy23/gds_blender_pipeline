@@ -7,7 +7,8 @@ AIM raw GDS -> visual/render GDS preprocessor.
 Current functionality:
   - Read raw GDS using gdsfactory.
   - Flatten it.
-  - Compute an extended bounding box.
+  - Use an enclosing DIAM outer boundary, or extend the full layout bbox.
+  - Optionally add ONE Lab fill/cheese to raw regions before render conversion.
   - Generate substrate render regions:
       SUBSTRATE_BASE_RENDER
       SUBSTRATE_ETCHABLE_RENDER minus enabled TUAM_EXPANDED / DIAM etch regions
@@ -301,6 +302,62 @@ def bbox_region(
     ymax = microns_to_dbu(cy + height / 2.0, dbu)
 
     return kdb.Region(kdb.Box(xmin, ymin, xmax, ymax))
+
+
+def select_render_boundary(
+    c: gf.Component,
+    *,
+    diam_region: kdb.Region,
+    bbox: tuple[float, float, float, float],
+    margin: float,
+) -> tuple[kdb.Region, str]:
+    """Use closed DIAM outer contours only when they enclose the entire layout.
+
+    Fill the holes of merged trench polygons to recover the chip footprints.
+    Open trenches have no enclosed area and internal loops cannot qualify when
+    any raw geometry lies outside. Check every raw layer, including layers not
+    named in the registry, before removing the usual bbox margin.
+    """
+    footprint = kdb.Region()
+    for polygon in merge_region(diam_region).each():
+        if polygon.holes():
+            footprint.insert(kdb.Polygon(list(polygon.each_point_hull())))
+    footprint = merge_region(footprint)
+    if not footprint.is_empty():
+        size, center = extended_bbox_size_and_center(bbox, 0.0)
+        raw_box = bbox_region(size=size, center=center, dbu=c.kcl.dbu)
+        # Include bbox-only content such as labels in the extent check.
+        if (raw_box - kdb.Region(footprint.bbox())).is_empty():
+            for layer_index in c.kcl.layout.layer_indices():
+                # Materialize the region: an iterator over only text shapes can
+                # otherwise report nonempty despite containing no polygons.
+                raw = merge_region(kdb.Region(c.kdb_cell.begin_shapes_rec(layer_index)))
+                if not (raw - footprint).is_empty():
+                    break
+            else:
+                return footprint, "DIAM"
+
+    size, center = extended_bbox_size_and_center(bbox, margin)
+    return bbox_region(size=size, center=center, dbu=c.kcl.dbu), "layout_bbox"
+
+
+def clip_output_to_boundary(
+    c: gf.Component,
+    *,
+    layers: list[tuple[int, int]],
+    boundary: kdb.Region,
+) -> int:
+    """Keep derived/rounded output inside the enclosing trench's outer edge."""
+    changed = 0
+    for layer in sorted(set(layers)):
+        region = region_for_layer(c, layer)
+        if (region - boundary).is_empty():
+            continue
+        shapes = c.kdb_cell.shapes(c.kcl.layout.layer(*layer))
+        shapes.clear()
+        insert_simple_region_shapes(shapes, merge_region(region & boundary))
+        changed += 1
+    return changed
 
 
 def add_region(
@@ -598,12 +655,14 @@ def round_xy_region_preserving_topology(
     dbu: float,
     region_name: str,
     tolerance: int = PRESENTATION_METAL_ROUNDING_TOLERANCE,
-) -> tuple[kdb.Region, dict[str, int]]:
-    """Round a 2D region with TUAM's net-zero offset chain.
+) -> tuple[kdb.Region, dict[str, int | float]]:
+    """Use the requested radius unless it changes a component's topology.
 
-    The final topology must match the source. Intermediate erosion can split a
-    narrow neck temporarily, so the guard compares the fully reconstructed
-    contour after ``-radius, +2*radius, -radius``.
+    Retry each affected source component with halved, DBU-aligned radii. Check
+    the complete ``-radius, +2*radius, -radius`` chain: temporary erosion may
+    split a narrow neck which the later offsets reconstruct. At the grid limit,
+    keep the original component. Neighbour interactions are checked separately
+    so independent rounding cannot merge components or create extra holes.
     """
     if radius_um < 0:
         raise ValueError("XY rounding radius must be zero or greater")
@@ -613,44 +672,78 @@ def round_xy_region_preserving_topology(
     source = merge_region(region.dup())
     components_before, holes_before = region_topology(source)
     area_before = source.area()
-    if radius_um == 0 or source.is_empty():
-        return source, {
-            "components_before": components_before,
-            "components_after": components_before,
-            "holes_before": holes_before,
-            "holes_after": holes_before,
-            "area_before_dbu2": area_before,
-            "area_after_dbu2": area_before,
-        }
-    if microns_to_dbu(radius_um, dbu) <= 0:
+    if radius_um > 0 and not source.is_empty() and microns_to_dbu(radius_um, dbu) <= 0:
         raise ValueError(
             f"{region_name} XY rounding radius {radius_um} um is below one DBU"
         )
 
-    rounded = source
-    for distance in (-radius_um, 2.0 * radius_um, -radius_um):
-        if rounded.is_empty():
-            break
-        rounded = apply_region_offset(
-            rounded,
-            operation={
-                "type": "offset",
-                "distance": distance,
-                "join": "round",
-                "tolerance": tolerance,
-            },
-            dbu=dbu,
-            region_name=region_name,
-        )
+    originals = [kdb.Region(polygon) for polygon in source.each()]
+    topologies = [region_topology(component) for component in originals]
 
-    rounded = merge_region(rounded)
-    components_after, holes_after = region_topology(rounded)
-    if (components_after, holes_after) != (components_before, holes_before):
-        raise ValueError(
-            f"{region_name} XY rounding changed topology: "
-            f"components {components_before}->{components_after}, "
-            f"holes {holes_before}->{holes_after}"
-        )
+    def smaller_radius(radius: float) -> float:
+        return (microns_to_dbu(radius, dbu) // 2) * dbu
+
+    def round_component(index: int, radius: float) -> tuple[kdb.Region, float]:
+        while radius > 0:
+            candidate = originals[index]
+            for distance in (-radius, 2.0 * radius, -radius):
+                if candidate.is_empty():
+                    break
+                candidate = apply_region_offset(
+                    candidate,
+                    operation={
+                        "type": "offset", "distance": distance,
+                        "join": "round", "tolerance": tolerance,
+                    },
+                    dbu=dbu,
+                    region_name=region_name,
+                )
+            if region_topology(candidate) == topologies[index]:
+                return candidate, radius
+            radius = smaller_radius(radius)
+        return originals[index], 0.0
+
+    candidates = []
+    radii = []
+    for index in range(len(originals)):
+        candidate, radius = round_component(index, radius_um)
+        candidates.append(candidate)
+        radii.append(radius)
+
+    while True:
+        rounded = kdb.Region()
+        for candidate in candidates:
+            rounded += candidate
+        rounded = merge_region(rounded)
+        components_after, holes_after = region_topology(rounded)
+        if (components_after, holes_after) == (components_before, holes_before):
+            break
+
+        # Only neighbours can interact. KLayout's spatial index avoids an
+        # all-pairs scan for layouts with many thousands of contacts/vias.
+        boxes = kdb.Shapes()
+        for index, candidate in enumerate(candidates):
+            boxes.insert(candidate.bbox()).set_property("component_index", index)
+        affected = set()
+        for index, candidate in enumerate(candidates):
+            for shape in boxes.each_touching(candidate.bbox()):
+                other = shape.property("component_index")
+                if other <= index:
+                    continue
+                expected = (2, topologies[index][1] + topologies[other][1])
+                if region_topology(merge_region(candidate + candidates[other])) != expected:
+                    affected.update((index, other))
+        reducible = [index for index in sorted(affected) if radii[index] > 0]
+        if not reducible:
+            raise ValueError(
+                f"{region_name} XY rounding changed topology: "
+                f"components {components_before}->{components_after}, "
+                f"holes {holes_before}->{holes_after}"
+            )
+        for index in reducible:
+            candidates[index], radii[index] = round_component(
+                index, smaller_radius(radii[index])
+            )
 
     return rounded, {
         "components_before": components_before,
@@ -659,6 +752,10 @@ def round_xy_region_preserving_topology(
         "holes_after": holes_after,
         "area_before_dbu2": area_before,
         "area_after_dbu2": rounded.area(),
+        "adapted_components": sum(radius < radius_um for radius in radii),
+        "unrounded_components": sum(radius == 0 for radius in radii),
+        "min_radius_um": min(radii, default=0.0),
+        "max_radius_um": max(radii, default=0.0),
     }
 
 
@@ -1138,6 +1235,8 @@ def preprocess_aim_gds(
     max_polygon_vertices: int | None = None,
     include_undercut: bool = True,
     include_passivation_opening: bool = True,
+    include_fill_cheese: bool = False,
+    fill_cheese_config: str | Path | None = None,
     presentation_metal_xy_fillet_width_um: float = 0.0,
     presentation_contact_via_xy_fillet_width_um: float = 0.0,
     min_export_z: float | None = None,
@@ -1205,11 +1304,44 @@ def preprocess_aim_gds(
 
     c_flat = import_flat_gds(input_gds)
     bbox = component_bbox(c_flat)
-    size, center = extended_bbox_size_and_center(bbox, bbox_margin)
     dbu = c_flat.kcl.dbu
-    substrate_region = bbox_region(size=size, center=center, dbu=dbu)
-
     input_regions = build_input_regions(c_flat, input_layers)
+    substrate_region, boundary_source = select_render_boundary(
+        c_flat,
+        diam_region=input_regions.get("DIAM", kdb.Region()),
+        bbox=bbox,
+        margin=bbox_margin,
+    )
+    render_bbox = substrate_region.bbox()
+    size = (render_bbox.width() * dbu, render_bbox.height() * dbu)
+    center = (
+        (render_bbox.left + render_bbox.right) * dbu / 2.0,
+        (render_bbox.bottom + render_bbox.top) * dbu / 2.0,
+    )
+
+    fill_cheese_stats = None
+    if fill_cheese_config is not None and not include_fill_cheese:
+        raise ValueError("fill_cheese_config requires fill cheese to be enabled")
+    if include_fill_cheese:
+        if __package__:
+            from .aim_fill_cheese import finish_regions, load_fill_cheese_config
+        else:
+            from aim_fill_cheese import finish_regions, load_fill_cheese_config
+        print("Fill / cheese: enabled (ONE Lab profile)", flush=True)
+        finished, fill_cheese_stats = finish_regions(
+            c_flat.kdb_cell,
+            bounds=bbox,
+            config=load_fill_cheese_config(fill_cheese_config),
+            progress=lambda message: print(message, flush=True),
+        )
+        # Keep the original bbox, DIAM, TUAM, blockers, vias and doping markers.
+        # Every recipe reads the original design; adaptive XY rounding follows
+        # finishing on the actual render regions, including new cheese holes.
+        input_regions = {
+            name: finished.get(layer, input_regions[name])
+            for name, layer in input_layers.items()
+        }
+
     # Emptying the raw feature symbols disables every dependent expression while
     # preserving unrelated processing such as DIAM and silicon doping.
     processing_input_regions = dict(input_regions)
@@ -1238,6 +1370,8 @@ def preprocess_aim_gds(
     )
 
     c_out = gf.Component(name=f"{Path(input_gds).stem}_VISUAL")
+    if fill_cheese_stats is not None:
+        c_out.info["fill_cheese"] = fill_cheese_stats
     if c_out.kcl.dbu != dbu:
         raise RuntimeError(f"Output dbu {c_out.kcl.dbu} does not match input dbu {dbu}")
 
@@ -1322,6 +1456,14 @@ def preprocess_aim_gds(
         ),
     )
 
+    clipped_layers = 0
+    if boundary_source == "DIAM":
+        clipped_layers = clip_output_to_boundary(
+            c_out,
+            layers=[get_layer(render_layers, name) for name in render_layers],
+            boundary=substrate_region,
+        )
+
     fracture_stats = None
     if max_polygon_vertices is not None:
         fracture_stats = fracture_output_regions(
@@ -1340,7 +1482,12 @@ def preprocess_aim_gds(
     print(
         f"Input bbox: xmin={bbox[0]:.3f}, ymin={bbox[1]:.3f}, xmax={bbox[2]:.3f}, ymax={bbox[3]:.3f}"
     )
-    print(f"BBox margin: {bbox_margin:.3f} um")
+    if boundary_source == "DIAM":
+        print("Render boundary: enclosing DIAM outer edge (no bbox margin)")
+        print(f"Layers clipped to DIAM outer edge: {clipped_layers}")
+    else:
+        print("Render boundary: expanded layout bbox")
+        print(f"BBox margin: {bbox_margin:.3f} um")
     print(f"TUAM undercut: {'enabled' if include_undercut else 'disabled'}")
     print(
         "PAAM passivation opening: "
@@ -1405,7 +1552,11 @@ def preprocess_aim_gds(
             - rounding_stats["area_before_dbu2"]
         )
         print(
-            f"  {name}: radius={rounding_stats['radius_um']:.3f} um, "
+            f"  {name}: requested_radius={rounding_stats['radius_um']:.3f} um, "
+            f"effective_radius={rounding_stats['min_radius_um']:.3f}.."
+            f"{rounding_stats['max_radius_um']:.3f} um, "
+            f"adapted={rounding_stats['adapted_components']}, "
+            f"unrounded={rounding_stats['unrounded_components']}, "
             f"round_tolerance={rounding_stats['tolerance']}, components="
             f"{rounding_stats['components_before']}->"
             f"{rounding_stats['components_after']}, holes="
@@ -1436,7 +1587,8 @@ def main() -> None:
     )
     parser.add_argument("--output", required=True, help="Output visual/render GDS")
     parser.add_argument(
-        "--bbox-margin", type=float, default=None, help="Override bbox margin in um"
+        "--bbox-margin", type=float, default=None,
+        help="Override bbox margin in um when no DIAM trench encloses the layout",
     )
     parser.add_argument(
         "--max-polygon-vertices",
@@ -1454,7 +1606,8 @@ def main() -> None:
         default=0.0,
         help=(
             "Round only M1AM, M2AM, and MLAM visual-GDS XY contours with "
-            "the TUAM-style net-zero offset chain; zero disables "
+            "the net-zero offset chain; adaptively reduce this maximum radius "
+            "per component to preserve topology; zero disables "
             "(default: 0)"
         ),
     )
@@ -1464,7 +1617,8 @@ def main() -> None:
         default=0.0,
         help=(
             "Round only CBAM, V1AM, and VAAM visual-GDS XY contours with "
-            "the guarded net-zero gdstk offset chain; zero disables "
+            "the net-zero gdstk offset chain; adaptively reduce this maximum "
+            "radius per component to preserve topology; zero disables "
             "(default: 0)"
         ),
     )
@@ -1482,6 +1636,14 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help=("Export the PAAM passivation-opening cutter (default: enabled)"),
+    )
+    parser.add_argument(
+        "--fill-cheese", action=argparse.BooleanOptionalAction, default=False,
+        help="Add ONE Lab dummy fill and metal cheese before visual conversion (default: off)",
+    )
+    parser.add_argument(
+        "--fill-cheese-config", type=Path, default=None,
+        help="Optional JSON fill/cheese profile; requires --fill-cheese",
     )
     parser.add_argument(
         "--show",
@@ -1506,6 +1668,8 @@ def main() -> None:
         max_polygon_vertices=args.max_polygon_vertices,
         include_undercut=args.undercut,
         include_passivation_opening=args.passivation_opening,
+        include_fill_cheese=args.fill_cheese,
+        fill_cheese_config=args.fill_cheese_config,
         presentation_metal_xy_fillet_width_um=(
             args.presentation_metal_xy_fillet_width_um
         ),

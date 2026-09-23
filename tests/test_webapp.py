@@ -43,9 +43,56 @@ class StudioTests(unittest.TestCase):
             with self.assertRaises(ValueError):pipeline.camera(values)
     def test_geometry_defaults_match_production_makefile(self):
         text=(ROOT/'Makefile').read_text()
-        mapping={'metal_fillet':'AIM_PREPROCESS_METAL_XY_FILLET_WIDTH_UM','via_fillet':'AIM_PREPROCESS_CONTACT_VIA_XY_FILLET_WIDTH_UM','bevel_width':'AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_WIDTH_UM','max_vertices':'AIM_PREPROCESS_MAX_POLYGON_VERTICES','merge_layers':'AIM_BLENDER_MERGE_LAYERS','metal_bevel':'AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED'}
+        mapping={'fill_cheese':'AIM_PREPROCESS_FILL_CHEESE','metal_fillet':'AIM_PREPROCESS_METAL_XY_FILLET_WIDTH_UM','via_fillet':'AIM_PREPROCESS_CONTACT_VIA_XY_FILLET_WIDTH_UM','bevel_width':'AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_WIDTH_UM','max_vertices':'AIM_PREPROCESS_MAX_POLYGON_VERTICES','merge_layers':'AIM_BLENDER_MERGE_LAYERS','metal_bevel':'AIM_BLENDER_PRESENTATION_METAL_Z_BEVEL_ENABLED'}
         import re
         for key,var in mapping.items():self.assertEqual(float(re.search(r'^'+var+r' \?= (.+)$',text,re.M)[1]),pipeline.DEFAULTS[key])
+    def test_adaptive_rounding_uses_saved_radii_in_shared_preprocessor(self):
+        import subprocess
+        from kfactory import kdb
+        from scripts.aim_preprocess_gds import ensure_active_pdk, add_static_expression_render_layers, region_topology
+        import gdsfactory as gf
+        cfg={key:'/tmp/input' for key in pipeline.FILES}|{'python':sys.executable}
+        ensure_active_pdk()
+        for values in [{}, {'metal_fillet':.12, 'via_fillet':.06}, {'metal_fillet':0, 'via_fillet':0}]:
+            opts=pipeline.options(values)
+            saved=pipeline.preset('adaptive',CAMERA,opts,[])
+            restored=pipeline.options(saved['webapp']['options'])
+            command=pipeline.prepare_commands(cfg,restored,self.root)[-1]
+            # Run the generated argv through the actual parser, then exercise
+            # the same layer dispatch with both safe and disappearing shapes.
+            parsed=subprocess.run(command+['--help'],capture_output=True,text=True)
+            self.assertEqual(parsed.returncode,0,parsed.stderr)
+            metal=float(command[command.index('--presentation-metal-xy-fillet-width-um')+1])
+            via=float(command[command.index('--presentation-contact-via-xy-fillet-width-um')+1])
+            self.assertEqual((metal,via),(opts['metal_fillet'],opts['via_fillet']))
+            source=kdb.Region(kdb.Box(0,0,50,50))+kdb.Region(kdb.Box(1000,1000,11000,11000))
+            layers={name:dict(source='static',expression='RAW',layer=[200+i,0],z=0,height=1) for i,name in enumerate(('M1AM_RENDER','CBAM_RENDER'))}
+            output=gf.Component()
+            stats=add_static_expression_render_layers(c_out=output,render_layers=layers,region_symbols={'RAW':source},handled_layers=set(),min_export_z=None,presentation_metal_xy_fillet_width_um=metal,presentation_contact_via_xy_fillet_width_um=via)
+            for name,layer in layers.items():
+                result=kdb.Region(output.kdb_cell.begin_shapes_rec(output.kcl.layer(*layer['layer'])))
+                self.assertEqual(region_topology(result.merged(True,0)),(2,0))
+                if metal and via:
+                    self.assertEqual(stats['presentation_xy_rounding'][name]['adapted_components'],1)
+                else:
+                    self.assertTrue((source ^ result).is_empty())
+
+    def test_fill_cheese_flag_defaults_preset_and_cli_parser(self):
+        import subprocess
+        self.assertFalse(pipeline.options({})['fill_cheese'])
+        with self.assertRaisesRegex(ValueError, 'fill_cheese must be boolean'):
+            pipeline.options({'fill_cheese': 'yes'})
+        cfg={key:'/tmp/input' for key in pipeline.FILES}|{'python':sys.executable}
+        for enabled in (False, True):
+            opts=pipeline.options({'fill_cheese':enabled})
+            saved=pipeline.preset('filled',CAMERA,opts,[])
+            restored=pipeline.options(saved['webapp']['options'])
+            command=pipeline.prepare_commands(cfg,restored,self.root)[-1]
+            self.assertEqual('--fill-cheese' in command,enabled)
+            self.assertEqual(subprocess.run(command+['--help'],capture_output=True).returncode,0)
+            self.assertEqual(saved['render']['samples'],1024)
+            self.assertEqual(saved['render']['resolution_x'],3200)
+
     def test_preset_round_trip_through_real_blender_loader(self):
         o=pipeline.options({'width':900,'height':1600,'denoise':False})
         value=pipeline.preset('test',CAMERA,o,['M2AM_RENDER'],{'lighting':{'sun':{'strength':3}},'color_management':{'view_transform':'AgX','look':'AgX - High Contrast'}})
@@ -97,6 +144,66 @@ class StudioTests(unittest.TestCase):
                 face=Polygon([(t[0],t[1]),(t[3],t[4]),(t[6],t[7])]);area+=face.area;self.assertFalse(face.contains(Point(5,5)))
         self.assertAlmostEqual(area,84)
         with self.assertRaisesRegex(ValueError,'budget'):pipeline.preview_mesh(gds,stack,pipeline.DEFAULTS|{'preview_limit':1},root=self.root)
+    def test_dense_preview_adapts_and_keeps_all_shapes_and_render_inputs(self):
+        import gdstk
+        from shapely.geometry import Point, Polygon
+        lib=gdstk.Library(unit=1e-6);cell=lib.new_cell('DENSE')
+        for row in range(10):
+            for col in range(10):cell.add(gdstk.rectangle((col*2,row*2),(col*2+1,row*2+1),layer=10))
+        cell.add(*gdstk.boolean(gdstk.rectangle((25,0),(35,10)),gdstk.rectangle((28,3),(32,7)),'not',layer=20))
+        gds=self.root/'dense.gds';lib.write_gds(str(gds))
+        stack=self.root/'stack.yaml';stack.write_text(yaml.safe_dump({'VIA':{'index':10,'type':0,'z':2,'height':3},'RING':{'index':20,'type':0,'z':1,'height':1}}))
+        colors=self.root/'configs/blender/colors/aim';colors.mkdir(parents=True)
+        for name in ['realistic','fancy','marketing']:(colors/(name+'.yaml')).write_text('layers: {}\n')
+        hashes={p:pipeline.file_hash(p) for p in [gds,stack]}
+        opts=pipeline.options({'preview_limit':1000});before=copy.deepcopy(opts)
+        result=pipeline.preview_mesh(gds,stack,opts,root=self.root)
+        self.assertLessEqual(result['triangles'],1000)
+        self.assertTrue(result['preview_quality']['adapted'])
+        self.assertGreater(result['preview_quality']['flat_components'],0)
+        self.assertEqual(result['preview_quality']['components'],101)
+        self.assertEqual(opts,before)
+        self.assertEqual({p:pipeline.file_hash(p) for p in hashes},hashes)
+        self.assertEqual(result['bounds'],[[0,0,1],[35,19,5]])
+        self.assertEqual({x['name'] for x in result['meshes']},{'VIA','RING'})
+        meshes={x['name']:x for x in result['meshes']}
+        top=[];v=meshes['VIA']['positions']
+        for i in range(0,len(v),9):
+            t=v[i:i+9]
+            if t[2]==t[5]==t[8]==5:top.append(Polygon([(t[0],t[1]),(t[3],t[4]),(t[6],t[7])]))
+        for row in range(10):
+            for col in range(10):self.assertTrue(any(face.covers(Point(col*2+.5,row*2+.5)) for face in top))
+        v=meshes['RING']['positions']
+        for i in range(0,len(v),9):
+            t=v[i:i+9]
+            if t[2]==t[5]==t[8]==2:self.assertFalse(Polygon([(t[0],t[1]),(t[3],t[4]),(t[6],t[7])]).contains(Point(30,5)))
+        self.assertIn('Final Blender rendering',result['notes'])
+
+    def test_auto_preview_simplifies_curves_before_using_flat_shapes(self):
+        import gdstk
+        lib=gdstk.Library();cell=lib.new_cell('CURVES')
+        for i in range(8):cell.add(gdstk.ellipse((i*3,0),1,tolerance=.0002,layer=10))
+        gds=self.root/'curves.gds';lib.write_gds(str(gds))
+        stack=self.root/'stack.yaml';stack.write_text(yaml.safe_dump({'VIA':{'index':10,'type':0,'z':0,'height':1}}))
+        colors=self.root/'configs/blender/colors/aim';colors.mkdir(parents=True)
+        for name in ['realistic','fancy','marketing']:(colors/(name+'.yaml')).write_text('layers: {}\n')
+        result=pipeline.preview_mesh(gds,stack,pipeline.options({'preview_tolerance':0,'preview_limit':1000}),root=self.root)
+        quality=result['preview_quality']
+        self.assertTrue(quality['adapted'])
+        self.assertGreater(quality['effective_tolerance_um'],0)
+        self.assertEqual(quality['flat_components'],0)
+        self.assertLessEqual(result['triangles'],1000)
+        self.assertEqual(quality['components'],8)
+
+    def test_preview_detail_cannot_lower_production_commands_or_render_quality(self):
+        cfg={key:'/tmp/input' for key in pipeline.FILES}|{'python':sys.executable,'blender':'blender'}
+        full=pipeline.options({});coarse=pipeline.options({'preview_tolerance':10,'preview_limit':1000})
+        self.assertEqual(pipeline.prepare_commands(cfg,full,self.root),pipeline.prepare_commands(cfg,coarse,self.root))
+        self.assertEqual(pipeline.build_commands(cfg,full,self.root),pipeline.build_commands(cfg,coarse,self.root))
+        self.assertEqual(pipeline.preset('full',CAMERA,full,[])['render'],pipeline.preset('coarse',CAMERA,coarse,[])['render'])
+        self.assertEqual(full['samples'],1024)
+        self.assertEqual((full['width'],full['height']),(3200,2000))
+
     def test_empty_metal_layers_do_not_request_nonexistent_sidecars(self):
         import gdstk
         lib=gdstk.Library();cell=lib.new_cell('SILICON_ONLY');cell.add(gdstk.rectangle((0,0),(10,10),layer=10));lib.write_gds(str(self.root/'visual.gds'))

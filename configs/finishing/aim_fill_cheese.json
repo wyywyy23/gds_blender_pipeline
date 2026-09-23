@@ -1,0 +1,359 @@
+{
+  "layers": [
+    {
+      "name": "SEAM",
+      "layer": [
+        709,
+        727
+      ],
+      "fill": {
+        "kind": "dots_capsules",
+        "width": 0.6,
+        "pitch": [
+          1.2,
+          1.2
+        ],
+        "phase": [
+          0.0,
+          0.0
+        ],
+        "length": 2.8,
+        "stagger": false,
+        "rotation_deg": 90
+      },
+      "fill_block": [
+        727,
+        727
+      ],
+      "fill_clearance": 0.8,
+      "cheese": null,
+      "cheese_block": null,
+      "width_trigger": 5.0,
+      "edge_clearance": 1.0,
+      "via_clearance": 0.5,
+      "via_layers": [],
+      "diam_clearance": 6.0
+    },
+    {
+      "name": "FNAM",
+      "layer": [
+        733,
+        727
+      ],
+      "fill": {
+        "kind": "dots_capsules",
+        "width": 0.6,
+        "pitch": [
+          1.2,
+          1.2
+        ],
+        "phase": [
+          0.0,
+          0.0
+        ],
+        "length": 2.8,
+        "stagger": false,
+        "rotation_deg": 90
+      },
+      "fill_block": [
+        734,
+        727
+      ],
+      "fill_clearance": 0.8,
+      "cheese": null,
+      "cheese_block": null,
+      "width_trigger": 5.0,
+      "edge_clearance": 1.0,
+      "via_clearance": 0.5,
+      "via_layers": [],
+      "diam_clearance": 6.0
+    },
+    {
+      "name": "SNAM",
+      "layer": [
+        735,
+        727
+      ],
+      "fill": {
+        "kind": "dots_capsules",
+        "width": 0.6,
+        "pitch": [
+          1.2,
+          1.2
+        ],
+        "phase": [
+          0.0,
+          0.0
+        ],
+        "length": 2.8,
+        "stagger": false,
+        "rotation_deg": 90
+      },
+      "fill_block": [
+        736,
+        727
+      ],
+      "fill_clearance": 0.8,
+      "cheese": null,
+      "cheese_block": null,
+      "width_trigger": 5.0,
+      "edge_clearance": 1.0,
+      "via_clearance": 0.5,
+      "via_layers": [],
+      "diam_clearance": 6.0
+    },
+    {
+      "name": "M1AM",
+      "layer": [
+        710,
+        727
+      ],
+      "fill": {
+        "kind": "square",
+        "width": 1.6,
+        "pitch": [
+          3.0,
+          3.0
+        ],
+        "phase": [
+          0.0,
+          0.0
+        ],
+        "length": 0.0,
+        "stagger": false,
+        "rotation_deg": 0
+      },
+      "fill_block": [
+        751,
+        727
+      ],
+      "fill_clearance": 1.0,
+      "cheese": {
+        "kind": "square",
+        "width": 1.0,
+        "pitch": [
+          3.0,
+          3.0
+        ],
+        "phase": [
+          0.0,
+          0.0
+        ],
+        "length": 0.0,
+        "stagger": true,
+        "rotation_deg": 0
+      },
+      "cheese_block": [
+        752,
+        727
+      ],
+      "width_trigger": 5.0,
+      "edge_clearance": 1.5,
+      "via_clearance": 0.5,
+      "via_layers": [
+        [
+          720,
+          727
+        ],
+        [
+          721,
+          727
+        ],
+        [
+          722,
+          727
+        ],
+        [
+          715,
+          727
+        ]
+      ],
+      "diam_clearance": 5.0
+    },
+    {
+      "name": "M2AM",
+      "layer": [
+        725,
+        727
+      ],
+      "fill": {
+        "kind": "square",
+        "width": 1.6,
+        "pitch": [
+          3.0,
+          3.0
+        ],
+        "phase": [
+          0.0,
+          0.0
+        ],
+        "length": 0.0,
+        "stagger": false,
+        "rotation_deg": 0
+      },
+      "fill_block": [
+        755,
+        727
+      ],
+      "fill_clearance": 1.0,
+      "cheese": {
+        "kind": "square",
+        "width": 1.0,
+        "pitch": [
+          3.0,
+          3.0
+        ],
+        "phase": [
+          0.0,
+          0.0
+        ],
+        "length": 0.0,
+        "stagger": true,
+        "rotation_deg": 0
+      },
+      "cheese_block": [
+        756,
+        727
+      ],
+      "width_trigger": 5.0,
+      "edge_clearance": 1.5,
+      "via_clearance": 0.5,
+      "via_layers": [
+        [
+          715,
+          727
+        ],
+        [
+          771,
+          727
+        ],
+        [
+          902,
+          727
+        ]
+      ],
+      "diam_clearance": 5.0
+    },
+    {
+      "name": "MLAM",
+      "layer": [
+        780,
+        727
+      ],
+      "fill": {
+        "kind": "square",
+        "width": 8.0,
+        "pitch": [
+          15.0,
+          15.0
+        ],
+        "phase": [
+          0.0,
+          0.0
+        ],
+        "length": 0.0,
+        "stagger": false,
+        "rotation_deg": 0
+      },
+      "fill_block": [
+        782,
+        727
+      ],
+      "fill_clearance": 2.0,
+      "cheese": {
+        "kind": "square",
+        "width": 4.0,
+        "pitch": [
+          9.0,
+          9.0
+        ],
+        "phase": [
+          0.0,
+          0.0
+        ],
+        "length": 0.0,
+        "stagger": true,
+        "rotation_deg": 0
+      },
+      "cheese_block": [
+        784,
+        727
+      ],
+      "width_trigger": 9.0,
+      "edge_clearance": 3.0,
+      "via_clearance": 0.8,
+      "via_layers": [
+        [
+          771,
+          727
+        ]
+      ],
+      "diam_clearance": 5.0
+    }
+  ],
+  "waveguide_layers": [
+    [
+      709,
+      727
+    ],
+    [
+      702,
+      727
+    ],
+    [
+      733,
+      727
+    ],
+    [
+      735,
+      727
+    ]
+  ],
+  "waveguide_keepout": 7.0,
+  "global_fill_keepouts": [],
+  "max_candidates": 2000000,
+  "schema_version": 1,
+  "global_keepouts": [
+    [
+      726,
+      727
+    ],
+    [
+      802,
+      727
+    ],
+    [
+      803,
+      727
+    ],
+    [
+      804,
+      727
+    ]
+  ],
+  "global_keepout_clearance": 0.0,
+  "layer_keepouts": [
+    {
+      "layer": [
+        777,
+        727
+      ],
+      "clearance": 3.75
+    }
+  ],
+  "keepout_tolerance": 144,
+  "device_layers": [
+    [
+      802,
+      727
+    ],
+    [
+      803,
+      727
+    ],
+    [
+      804,
+      727
+    ]
+  ]
+}

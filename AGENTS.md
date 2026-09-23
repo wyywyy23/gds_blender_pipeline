@@ -47,3 +47,13 @@
   to IOR: the value must govern the relevant reflection/refraction branch.
   Shared cladding settings must work across GDS layouts; validation examples
   must not introduce filename-, device- or coordinate-specific material branches.
+
+- Place Studio controls by the operation they require: visual GDS preprocessing
+  controls in the upper-left source section, scene construction controls in the
+  lower-left Build scene section, and camera/render/visibility controls on the
+  right with the preset. Keep preview-only detail settings beside the viewport.
+  Only visual changes may require visual regeneration before building. Scene and
+  preset changes must leave Build available for the checked visual; update simple
+  preview transforms immediately where possible. Defaults apply only to their
+  own section. New options must declare and verify their stage against the actual
+  preprocessing/build/preset path, not only their visual label.
