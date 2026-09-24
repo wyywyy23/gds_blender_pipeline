@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
   "id": "gds-studio-aim-inputs",
-  "version": "2026.09.23.2",
+  "version": "2026.09.24.1",
   "title": "GDS Studio AIM setup inputs",
   "purpose": "tool-setup",
   "access": "authorized-collaborators-only",
   "repository_id": "R-20260902-145808-7CDF",
   "repository_remote": "git@github.com:wyywyy23/gds_blender_pipeline.git",
-  "source_commit": "15d57981afc9940404e7ca0fc0f380a962682476",
-  "archive_path": ".facultyos/bundles/gds-studio-aim-inputs-2026.09.23.2.zip",
+  "source_commit": "28e8c889f8eb76eeed8e3093ec2cf638f016b2cf",
+  "archive_path": ".facultyos/bundles/gds-studio-aim-inputs-2026.09.24.1.zip",
   "members": [
     {
       "path": "external_pdks/AIMPhotonics_ACT1/tech.py",
@@ -53,5 +53,5 @@
       "size_bytes": 2405
     }
   ],
-  "setup": "Use a checkout containing software commit 15d57981afc9940404e7ca0fc0f380a962682476 or a compatible descendant. Install Python3.11+, Node.js/npm and Blender with GDSII Importer for rendering. Run python3 scripts/setup_webapp.py, then python3 scripts/start_webapp.py. The four AIM inputs restore to their documented default paths; two matching configs/finishing profiles support optional fill/cheese, disabled by default. See docs/web-app.md for staged visual, scene, preset and preview controls. The ZIP supplements software and contains no layout history, personal presets, local configuration, absolute device paths or generated output. Preserve different existing files; use a clean matching checkout for restoration."
+  "setup": "Use a checkout containing software commit 28e8c889f8eb76eeed8e3093ec2cf638f016b2cf or a compatible descendant. Install Python3.11+, Node.js/npm and Blender with GDSII Importer for rendering. Run python3 scripts/setup_webapp.py, then python3 scripts/start_webapp.py. The four AIM inputs restore to their documented default paths; two matching configs/finishing profiles support optional fill/cheese, disabled by default. See docs/web-app.md for staged visual, scene, preset and preview controls. The ZIP supplements software and contains no layout history, personal presets, local configuration, absolute device paths or generated output. Preserve different existing files; use a clean matching checkout for restoration."
 }
