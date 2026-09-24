@@ -29,6 +29,13 @@ function ready(){
 function change(spec){const field=el('option-'+spec.key);if(typeof spec.default==='boolean')field.checked=!spec.default;else if(spec.choices)field.value=spec.choices.find(v=>v!==spec.default);else field.value=String(spec.default+(spec.step||1));field.oninput();}
 const containers={visual:'visual-options',scene:'options',preset:'preset-options',preview:'preview-options'};
 ready();
+const cameraVisual=a.geometrySignature();
+assert.equal(a.state.camera.dof.adapt_to_view,true);
+el('dof-adaptive').checked=false;el('dof-adaptive').onchange();
+assert.equal(a.payload().camera.dof.adapt_to_view,false);
+assert.equal(a.geometrySignature(),cameraVisual);a.updateButtons();assert.equal(el('build').disabled,false);
+el('dof-adaptive').checked=true;el('dof-adaptive').onchange();
+assert.equal(a.payload().camera.dof.adapt_to_view,true);
 for(const spec of specs){let node=el('option-'+spec.key);while(node&&!Object.values(containers).includes(node.id))node=node.parent;assert.equal(node?.id,containers[spec.stage],spec.key+' placement');}
 for(const spec of specs){
  ready();const signature=a.geometrySignature();change(spec);

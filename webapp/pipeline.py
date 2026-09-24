@@ -77,7 +77,8 @@ def camera(value):
     if result['clip_end']<=result['clip_start']: raise ValueError('Far clip must exceed near clip')
     dof=value.get('dof',{})
     if not isinstance(dof,dict) or not isinstance(dof.get('enabled',False),bool): raise ValueError('Invalid depth of field')
-    result['dof']={'enabled':dof.get('enabled',False),'focus_point':vector(dof.get('focus_point',[0,0,0]),'focus point'),'aperture_fstop':number(dof.get('aperture_fstop',5.6),'f-stop',0.1,128)}
+    if not isinstance(dof.get('adapt_to_view',True),bool): raise ValueError('Invalid adaptive depth of field')
+    result['dof']={'adapt_to_view':dof.get('adapt_to_view',True),'enabled':dof.get('enabled',False),'focus_point':vector(dof.get('focus_point',[0,0,0]),'focus point'),'aperture_fstop':number(dof.get('aperture_fstop',5.6),'f-stop',0.1,128)}
     return result
 
 

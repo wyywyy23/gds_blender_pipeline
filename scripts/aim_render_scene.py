@@ -131,7 +131,11 @@ def load_preset(path: Path) -> dict[str, Any]:
         dof = require_mapping(camera_data["dof"], "camera.dof")
         if not isinstance(dof.get("enabled"), bool):
             raise ValueError("camera.dof.enabled must be true or false")
+        adapt = dof.get("adapt_to_view", False)
+        if not isinstance(adapt, bool):
+            raise ValueError("camera.dof.adapt_to_view must be true or false")
         camera["dof"] = {
+            "adapt_to_view": adapt,
             "enabled": dof["enabled"],
             "focus_point": require_vector3(dof.get("focus_point"), "camera.dof.focus_point"),
             "aperture_fstop": require_positive_number(dof.get("aperture_fstop"), "camera.dof.aperture_fstop"),
@@ -397,6 +401,21 @@ def resolve_output_directory(
     return configured if configured.is_absolute() else REPO_ROOT / configured
 
 
+def adaptive_dof_fstop(fstop: float, lens_mm: float, focus_distance: float) -> float:
+    """Presentation optics: normalize the focus distance to five focal lengths.
+
+    GDS coordinates remain in micrometres represented as Blender units. Cycles
+    converts its lens from mm to metres but does not apply scene.unit_settings to
+    aperture size. Adjusting only the effective f-stop preserves framing and all
+    geometry. This is a view-relative illustration convention, not microscope
+    optics. Uniformly scaled views therefore have the same pixel blur.
+    """
+    if any(not math.isfinite(v) or v <= 0 for v in (fstop, lens_mm, focus_distance)):
+        raise ValueError("Adaptive DoF requires a positive lens, aperture and focus distance")
+    # Cycles itself clamps the effective f-stop at 1e-5.
+    return max(1e-5, fstop * (5.0 * lens_mm * 1e-3) / focus_distance)
+
+
 def apply_camera(scene: Any, camera_config: dict[str, Any]) -> Any:
     import bpy
 
@@ -421,7 +440,6 @@ def apply_camera(scene: Any, camera_config: dict[str, Any]) -> Any:
     if "dof" in camera_config:
         dof = camera_config["dof"]
         camera.data.dof.use_dof = dof["enabled"]
-        camera.data.dof.aperture_fstop = dof["aperture_fstop"]
         focus = bpy.data.objects.get("GDSStudioFocus")
         if focus is None:
             focus = bpy.data.objects.new("GDSStudioFocus", None)
@@ -429,6 +447,24 @@ def apply_camera(scene: Any, camera_config: dict[str, Any]) -> Any:
         focus.location = dof["focus_point"]
         focus.hide_render = True
         camera.data.dof.focus_object = focus
+        bpy.context.view_layer.update()
+        # Match Cycles' axial focus distance, including an off-axis picked point.
+        view_z = camera.matrix_world.col[2].to_3d().normalized()
+        distance = abs((camera.matrix_world.translation - focus.matrix_world.translation).dot(view_z))
+        adaptive = dof.get("adapt_to_view", False)
+        effective_fstop = dof["aperture_fstop"]
+        if adaptive and dof["enabled"]:
+            effective_fstop = adaptive_dof_fstop(effective_fstop, camera.data.lens, distance)
+        camera.data.dof.aperture_fstop = effective_fstop
+        camera.data["gds_studio_dof"] = {
+            "adapt_to_view": adaptive,
+            "requested_fstop": dof["aperture_fstop"],
+            "effective_fstop": effective_fstop,
+            "focus_distance": distance,
+        }
+        print(f"DoF preset: enabled={dof['enabled']}, adapt_to_view={adaptive}, "
+              f"aperture=f/{dof['aperture_fstop']:g}, effective_fstop={effective_fstop:g}, "
+              f"focus={tuple(focus.location)}, distance={distance:g}")
     if "clip_start" in camera_config:
         camera.data.clip_start = camera_config["clip_start"]
     if "clip_end" in camera_config:

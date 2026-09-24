@@ -93,6 +93,24 @@ The preview shows simplified layer extrusions. Blender evaluates the final optic
 materials and surface detail. DOF on/off, focus point and aperture are saved and
 applied in Blender; browser depth-of-field blur remains a clearly marked TODO.
 
+Studio enables **Adapt depth of field to view size** by default. GDS coordinates
+stay in µm, while Blender's camera aperture otherwise treats their numerical values
+as metres, making ordinary f-stops produce almost no blur. Adaptation preserves
+framing and focus and scales only the effective aperture for chip illustrations.
+Keep f/5.6 for moderate depth of field; lower values make the blur stronger. This is
+an illustrative effect, not a physical microscope model. Render quality is unchanged.
+
+The preset records `camera.dof.adapt_to_view` and the requested f-stop. In Blender,
+the effective f-stop is `requested_fstop * (5 * lens_mm * 0.001) / axial_focus_distance`
+(with Cycles' minimum of `1e-5`). This normalizes the view to a focus distance of
+five focal lengths; uniformly scaling camera, geometry and focus preserves the blur.
+The requested/effective values are logged and retained in the camera data's
+`gds_studio_dof` custom property. Disabling adaptation uses Blender's native f-stop.
+Older preset files rendered directly keep native behavior; loading them in Studio
+turns adaptation on for the next saved preset unless explicitly disabled. Earlier
+presets and runs are never rewritten. This is a preset setting: no visual GDS
+regeneration is required.
+
 The current PDK workflow is AIM Photonics. The optional FacultyOS Project start
 button launches this same app on demand; it never starts with FacultyOS.
 

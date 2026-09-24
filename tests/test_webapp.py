@@ -97,7 +97,7 @@ class StudioTests(unittest.TestCase):
         o=pipeline.options({'width':900,'height':1600,'denoise':False})
         value=pipeline.preset('test',CAMERA,o,['M2AM_RENDER'],{'lighting':{'sun':{'strength':3}},'color_management':{'view_transform':'AgX','look':'AgX - High Contrast'}})
         path=self.root/'preset.yaml';path.write_text(yaml.safe_dump(value));loaded=aim_render_scene.load_preset(path)
-        self.assertEqual(loaded['camera']['dof'],dict(CAMERA['dof'],focus_point=(1.,2.,3.)));self.assertEqual(loaded['camera']['sensor_width_mm'],36)
+        self.assertEqual(loaded['camera']['dof'],dict(CAMERA['dof'],adapt_to_view=True,focus_point=(1.,2.,3.)));self.assertEqual(loaded['camera']['sensor_width_mm'],36)
         self.assertEqual(loaded['render']['resolution_x'],900);self.assertEqual(loaded['runs'][0]['hide_layers'],['M2AM_RENDER'])
         self.assertEqual(loaded['lighting']['sun']['strength'],3)
     def test_legacy_preset_still_supported(self):

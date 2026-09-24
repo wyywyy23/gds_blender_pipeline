@@ -62,3 +62,9 @@
   original layout and its clearance masks, then subtract DIAM from FNAM/SNAM.
   Keep finishing before trench cutting to match the user-selected process
   sequence; performance optimizations must preserve this order.
+
+- Validate depth of field with matched renders containing real depth variation,
+  not only enabled flags or focus-coordinate handoff. Check optical scale and
+  pixel blur at the intended output size. Keep illustrative aperture adaptation
+  explicit in the preset, preserve framing/focus and render quality, and verify
+  scale invariance plus saved-scene and rendering behavior.
