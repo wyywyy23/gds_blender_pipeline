@@ -20,8 +20,9 @@ Current functionality:
       intrinsic silicon
       doped silicon
       PN conflict debug
+  - Generate nitride expression layers with DIAM removed.
   - Copy remaining static expression layers:
-      nitride, contact, vias, metals, PDK black box
+      contact, vias, metals, PDK black box
   - Write output visual/render GDS.
 """
 
@@ -39,6 +40,7 @@ from kfactory import kdb
 import yaml
 
 OFFSET_WORK_LAYER = (9000, 0)
+DICED_NITRIDE_RENDER_LAYERS = frozenset({"FNAM_RENDER", "SNAM_RENDER"})
 PRESENTATION_METAL_RENDER_LAYERS = frozenset(
     {
         "M1AM_RENDER",
@@ -1195,6 +1197,12 @@ def add_static_expression_render_layers(
 
         stats["candidate"] += 1
         region = evaluate_region_expression(expression, region_symbols)
+        # Dicing follows expressions and optional fill/cheese, including legacy
+        # registries whose nitride expressions are just FNAM or SNAM.
+        if name in DICED_NITRIDE_RENDER_LAYERS:
+            diam = region_symbols.get("DIAM")
+            if diam is not None and not diam.is_empty():
+                region = merge_region(region - diam)
         fillet_radius_um = presentation_xy_fillet_radius_for_layer(
             name,
             metal_radius_um=presentation_metal_xy_fillet_width_um,

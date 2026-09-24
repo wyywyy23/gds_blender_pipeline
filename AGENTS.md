@@ -57,3 +57,8 @@
   preview transforms immediately where possible. Defaults apply only to their
   own section. New options must declare and verify their stage against the actual
   preprocessing/build/preset path, not only their visual label.
+
+- Preserve the visual preprocessing process order: compute fill/cheese from the
+  original layout and its clearance masks, then subtract DIAM from FNAM/SNAM.
+  Keep finishing before trench cutting to match the user-selected process
+  sequence; performance optimizations must preserve this order.
