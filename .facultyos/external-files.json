@@ -110,6 +110,13 @@
         "*.zip"
       ],
       "reason": "manual-only"
+    },
+    {
+      "root": ".local/validation",
+      "include": [
+        "*/*.yaml"
+      ],
+      "reason": "manual-only"
     }
   ]
 }

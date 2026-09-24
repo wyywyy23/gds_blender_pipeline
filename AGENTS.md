@@ -68,3 +68,10 @@
   pixel blur at the intended output size. Keep illustrative aperture adaptation
   explicit in the preset, preserve framing/focus and render quality, and verify
   scale invariance plus saved-scene and rendering behavior.
+
+- For this project, a user request to push includes both the reviewed Git changes
+  and updates to the configured OneDrive external-file store. Discover and preserve
+  new required originals and camera/render presets, including validation presets,
+  then verify both Git publication and OneDrive copies before reporting completion.
+  Keep generated scenes, renders and reproducible caches outside original-file
+  registration; retain their source inputs and settings.
