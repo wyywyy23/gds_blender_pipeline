@@ -188,7 +188,7 @@ def load_preset(path: Path) -> dict[str, Any]:
 
     lighting_data = data.get("lighting")
     if lighting_data is None:
-        lighting_data = {"sun": {"strength": 5.0, "follow_camera": False, "rotation_degrees": list(TX_CHECKERED_SUN_ROTATION)}}
+        lighting_data = {"sun": {"strength": 5.0, "follow_camera": False, "follow_camera_z": True, "azimuth_offset_degrees": 43.66, "rotation_degrees": list(TX_CHECKERED_SUN_ROTATION)}}
     lighting = None
     if lighting_data is not None:
         lighting_data = require_mapping(lighting_data, "lighting")
@@ -200,13 +200,27 @@ def load_preset(path: Path) -> dict[str, Any]:
         follow_camera = sun_data.get("follow_camera", False)
         if not isinstance(follow_camera, bool):
             raise ValueError("lighting.sun.follow_camera must be boolean")
+        follow_z = sun_data.get('follow_camera_z', False)
+        if not isinstance(follow_z, bool):
+            raise ValueError('lighting.sun.follow_camera_z must be boolean')
+        if follow_camera and follow_z:
+            raise ValueError('Choose full camera following or Z-only following, not both')
+        offset = sun_data.get('azimuth_offset_degrees', 43.66)
+        if isinstance(offset, bool) or not isinstance(offset, (int,float)) or not math.isfinite(offset):
+            raise ValueError('lighting.sun.azimuth_offset_degrees must be finite')
         if not follow_camera and sun_rotation_any is None:
             raise ValueError("Fixed Sun lighting requires rotation_degrees")
         relative_direction = require_vector3(
             sun_data.get('camera_relative_direction', list(TX_CHECKERED_RELATIVE_DIRECTION)),
             'lighting.sun.camera_relative_direction')
         source_light_rotation(relative_direction)  # Validate nonzero before native execution.
-        if follow_camera:
+        if follow_z:
+            fixed = require_vector3(sun_rotation_any, 'lighting.sun.rotation_degrees')
+            if abs(fixed[1]) > 1e-10:
+                raise ValueError('Z-only Sun following requires rotation Y=0')
+            sun_rotation = (fixed[0], 0.0, camera['rotation_degrees'][2] + offset)
+            sun_rotation_source = 'camera-z-follow'
+        elif follow_camera:
             sun_rotation = camera_relative_light_rotation(camera["rotation_degrees"], relative_direction)
             sun_rotation_source = "camera-derived default"
         else:
@@ -223,6 +237,7 @@ def load_preset(path: Path) -> dict[str, Any]:
                 "rotation_degrees": sun_rotation,
                 "rotation_source": sun_rotation_source,
                 "camera_relative_direction": relative_direction,
+                "azimuth_offset_degrees": offset,
             }
         }
 
@@ -521,15 +536,20 @@ def apply_lighting(scene: Any, lighting_config: dict[str, Any] | None) -> None:
     sun = scene.objects.get(sun_config["object"])
     if sun is None or sun.type != "LIGHT" or sun.data.type != "SUN":
         raise ValueError(f"Sun light object not found: {sun_config['object']}")
-    if sun_config['rotation_source'] == 'camera-derived default':
+    if sun_config['rotation_source'] in ('camera-derived default', 'camera-z-follow'):
         import bpy
         from mathutils import Vector
         bpy.context.view_layer.update()
         if scene.camera is None:
             raise ValueError('Camera-following lighting requires an active camera')
-        relative = sun_config.get('camera_relative_direction', TX_CHECKERED_RELATIVE_DIRECTION)
-        source = scene.camera.matrix_world.to_quaternion() @ Vector(relative)
-        rotation = source_light_rotation(source)
+        if sun_config['rotation_source'] == 'camera-z-follow':
+            rotation = (sun_config['rotation_degrees'][0], 0.0,
+                        math.degrees(scene.camera.matrix_world.to_euler('XYZ').z)
+                        + sun_config['azimuth_offset_degrees'])
+        else:
+            relative = sun_config.get('camera_relative_direction', TX_CHECKERED_RELATIVE_DIRECTION)
+            source = scene.camera.matrix_world.to_quaternion() @ Vector(relative)
+            rotation = source_light_rotation(source)
     else:
         rotation = sun_config['rotation_degrees']
     sun.data.energy = sun_config["strength"]

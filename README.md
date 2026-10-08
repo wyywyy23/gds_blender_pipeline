@@ -144,12 +144,17 @@ checksum matches the selected layout. CLI outputs retain `.local/runs/<design>/`
 
 Setup package `2026.09.24.1` pairs with software commit `28e8c889f8eb76eeed8e3093ec2cf638f016b2cf` and compatible descendants. It includes the four private AIM inputs and two matching editable finishing profiles; the software and render environment follow the setup instructions above.
 
-### Fixed TX checkered main light
+### TX checkered height with camera-Z-following main light
 
-New Studio presets and missing lighting settings use Sun strength 5, fixed world XYZ
-rotation `(27.927, 0, 21.83)`, and `lighting.sun.follow_camera: false`. This is the
-original TX checkered main-light direction; camera changes leave it unchanged.
-Thin-film mode keeps its existing 90% Sun intensity (4.5) and camera-adaptive,
-cladding-only softbox. Explicit fixed rotations remain preserved. Historical presets
-that explicitly request `follow_camera: true` retain the opt-in TX camera-relative
-behavior; no historical files are rewritten. Saved scenes retain the applied lights.
+New Studio presets use Sun strength 5, `follow_camera_z: true`, fixed X tilt 27.927°
+(Y=0), and `azimuth_offset_degrees: 43.66`. The Sun stays 62.073° above the XY plane;
+its world Z rotation is the final camera's world XYZ Euler Z plus 43.66°. This
+reproduces TX's Sun direction at the original TX camera Z=-21.83° while changing
+only azimuth at other views. Camera tilt changes do not change the Sun elevation.
+Preparation/rendering recomputes azimuth after applying the final camera. A saved
+scene retains the applied direction; manually moving a Blender camera requires
+reapplying the preset. At straight overhead, camera Z denotes image orientation.
+Thin-film mode retains the original 90% Sun strength (4.5) and cladding-only softbox.
+Explicit fixed rotations remain fixed unless a following option is selected. Full
+camera-relative following remains available with `follow_camera: true`; both following
+modes together are refused. Existing presets and rendered history remain immutable.

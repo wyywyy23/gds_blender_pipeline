@@ -46,17 +46,29 @@ class CameraLightingTests(unittest.TestCase):
         self.assertFalse(value['lighting']['sun']['follow_camera'])
         for value in (value, {k:v for k,v in value.items() if k!='lighting'}):
             loaded = self.load(value)
-            self.assertEqual(loaded['lighting']['sun']['rotation_source'],'preset')
-            self.assertEqual(loaded['lighting']['sun']['rotation_degrees'],render.TX_CHECKERED_SUN_ROTATION)
+            self.assertEqual(loaded['lighting']['sun']['rotation_source'],'camera-z-follow')
+            self.assertEqual(loaded['lighting']['sun']['rotation_degrees'],(27.927,0.0,118.66))
 
     def test_fixed_baseline_independent_of_camera_and_explicit_follow_supported(self):
         for angles in ([0,0,0], [65,20,-130]):
-            value = self.preset(); value['camera']['rotation_degrees'] = angles
+            value = self.preset({'lighting':{'sun':{'strength':5,'follow_camera':False,'rotation_degrees':[27.927,0,21.83]}}}); value['camera']['rotation_degrees'] = angles
             self.assertEqual(self.load(value)['lighting']['sun']['rotation_degrees'],render.TX_CHECKERED_SUN_ROTATION)
             value['lighting']['sun']['follow_camera'] = True
             loaded = self.load(value)['lighting']['sun']
             self.assertEqual(loaded['rotation_source'],'camera-derived default')
             self.assertEqual(loaded['rotation_degrees'],render.camera_relative_light_rotation(angles))
+
+    def test_z_only_keeps_elevation_and_azimuth_offset(self):
+        for angles in ([0,0,0], [27.927,0,-21.83], [70,20,120]):
+            value = self.preset(); value['camera']['rotation_degrees'] = angles
+            sun = self.load(value)['lighting']['sun']
+            self.assertEqual(sun['rotation_source'],'camera-z-follow')
+            self.assertAlmostEqual(sun['rotation_degrees'][0],27.927)
+            self.assertAlmostEqual(sun['rotation_degrees'][2]-angles[2],43.66)
+
+    def test_invalid_z_modes_refused(self):
+        for fields in ({'follow_camera_z':'yes'}, {'follow_camera_z':True,'follow_camera':True}, {'follow_camera_z':True,'azimuth_offset_degrees':float('nan')}, {'follow_camera_z':True,'rotation_degrees':[27.927,5,0]}):
+            with self.subTest(fields=fields), self.assertRaises(ValueError): self.load(self.preset({'lighting':{'sun':{'strength':5,**fields}}}))
 
     def test_explicit_fixed_light_preserved(self):
         lighting = {'sun':{'strength':2.5,'rotation_degrees':[25,5,60]}}
