@@ -161,9 +161,9 @@ layers:
     Metallic: 0.94
     Roughness: 0.14
 
-  # Copper backend: bright neutral silver for the marketing treatment.
+  # Copper backend: subtly warm M1 silver and cool M2 silver.
   M1AM_RENDER:
-    Base Color: [0.93, 0.94, 0.96, 1.0]
+    Base Color: [0.90, 0.88, 0.83, 1.0]
     Metallic: 0.94
     Roughness: 0.14
   V1AM_RENDER:
@@ -171,7 +171,7 @@ layers:
     Metallic: 0.94
     Roughness: 0.15
   M2AM_RENDER:
-    Base Color: [0.97, 0.98, 1.0, 1.0]
+    Base Color: [0.87, 0.93, 0.98, 1.0]
     Metallic: 0.94
     Roughness: 0.12
 

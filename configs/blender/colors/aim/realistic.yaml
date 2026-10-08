@@ -181,7 +181,7 @@ layers:
     Metallic: 0.90
     Roughness: 0.28
 
-  M1AM_RENDER: &copper_backend
+  M1AM_RENDER:
     Base Color: [0.80, 0.47, 0.27, 1.0]
     Metallic: 0.92
     Roughness: 0.24
@@ -189,7 +189,11 @@ layers:
     Base Color: [0.76, 0.44, 0.25, 1.0]
     Metallic: 0.92
     Roughness: 0.26
-  M2AM_RENDER: *copper_backend
+  # Slightly lighter, less red copper distinguishes the second metal level.
+  M2AM_RENDER:
+    Base Color: [0.78, 0.56, 0.38, 1.0]
+    Metallic: 0.92
+    Roughness: 0.24
 
   VAAM_RENDER: &aluminum_backend
     Base Color: [0.74, 0.76, 0.78, 1.0]
