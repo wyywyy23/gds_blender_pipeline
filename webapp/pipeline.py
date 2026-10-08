@@ -88,6 +88,7 @@ def preset(name, cam, opts, hidden, base=None):
     if not isinstance(hidden,list) or len(hidden)>500 or any(not isinstance(s,str) or not re.fullmatch(r'[A-Za-z0-9_]+',s) for s in hidden): raise ValueError('Invalid layer names')
     # Preserve existing lighting and color-management when editing a CLI preset.
     result={k:v for k,v in (base or {}).items() if k in ('lighting','color_management')}
+    result.setdefault('lighting', {'sun': {'object': 'Sun', 'strength': 5.0, 'follow_camera': False, 'rotation_degrees': [27.927, 0.0, 21.83]}})
     result.update(version=1,name=name,camera=camera(cam),render=dict(engine='CYCLES',device='CPU',samples=opts['samples'],denoise=opts['denoise'],adaptive_sampling=opts['adaptive_sampling'],transparent=opts['transparent'],file_format='PNG',resolution_x=opts['width'],resolution_y=opts['height']),output={'directory':'.local/webapp/renders'},runs=[dict(name='web_view',hide_layers=sorted(set(hidden)))],webapp={'options':opts})
     result['appearance'] = {'cladding_iridescence': {'enabled': opts['iridescence'], 'strength': opts['iridescence_strength']}}
     return result

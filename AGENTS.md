@@ -75,3 +75,7 @@
   then verify both Git publication and OneDrive copies before reporting completion.
   Keep generated scenes, renders and reproducible caches outside original-file
   registration; retain their source inputs and settings.
+
+- Treat questions about rendering options as requests for explanation. Preserve
+  confirmed settings unless the user explicitly requests a change. Performance
+  tuning that changes geometry or visual fidelity requires user authorization.

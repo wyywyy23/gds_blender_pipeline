@@ -116,11 +116,15 @@ def automatic_preset(value, layout_name):
 
 def valid_gds(path):
     path = Path(path)
-    if not path.is_file() or path.suffix.lower() != '.gds':
-        raise ValueError('Choose an existing .gds file')
+    if not path.is_file() or path.suffix.lower() not in ('.gds', '.oas', '.oasis'):
+        raise ValueError('Choose an existing .gds, .oas or .oasis file')
     with path.open('rb') as stream:
-        if stream.read(4) != b'\x00\x06\x00\x02':
+        header = stream.read(13)
+    if path.suffix.lower() == '.gds':
+        if header[:4] != b'\x00\x06\x00\x02':
             raise ValueError('This file does not have a valid binary GDSII header')
+    elif header != b'%SEMI-OASIS\r\n':
+        raise ValueError('This file does not have a valid binary OASIS header')
 
 
 class Library:
@@ -152,7 +156,10 @@ class Library:
         return value
 
     def raw(self, layout):
-        path = self.safe(self.layout_dir(layout['id']) / 'raw' / (layout['name'] + '_raw.gds'))
+        raw_format = layout.get('raw_format', 'gds')
+        if raw_format not in ('gds', 'oas', 'oasis'):
+            raise ValueError('Invalid archived layout format')
+        path = self.safe(self.layout_dir(layout['id']) / 'raw' / (layout['name'] + '_raw.' + raw_format))
         if not path.is_file() or file_hash(path) != layout['raw_sha256']:
             raise ValueError('The archived raw GDS changed or is missing. Import the source again as a new raw revision.')
         return path
@@ -173,6 +180,7 @@ class Library:
         source = resolve_file(self.root, str(source))
         valid_gds(source)
         sha = file_hash(source)
+        raw_format = source.suffix.lower()[1:]
         name = slug(original_name or source.name)
         key = name + '--' + sha[:12]
         directory = self.layout_dir(key)
@@ -191,13 +199,13 @@ class Library:
         temporary = self.safe(self.base / ('.import-' + uuid.uuid4().hex))
         try:
             (temporary / 'raw').mkdir(parents=True)
-            target = temporary / 'raw' / (name + '_raw.gds')
+            target = temporary / 'raw' / (name + '_raw.' + raw_format)
             shutil.copyfile(source, target)
             if file_hash(target) != sha or file_hash(source) != sha:
                 raise ValueError('Source changed during import; retry with a stable GDS')
             layout = dict(id=key, name=name, original_name=original_name or source.name,
                           raw_sha256=sha, size_bytes=target.stat().st_size,
-                          raw_path=f'raw/{name}_raw.gds', sources=[source_ref], created=time.time())
+                          raw_format=raw_format, raw_path=f'raw/{name}_raw.{raw_format}', sources=[source_ref], created=time.time())
             write_json(temporary / 'layout.json', layout)
             temporary.rename(directory)
             return layout

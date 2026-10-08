@@ -58,6 +58,30 @@ class LibraryTests(unittest.TestCase):
         self.source.unlink();self.assertEqual(self.library.raw(self.layout).read_bytes(),source_bytes)
         self.assertEqual(len(self.library.catalog()),1)
 
+    def test_oasis_import_retains_bytes_and_preprocesses_same_geometry(self):
+        import gdstk
+        from kfactory import kdb
+        from scripts.aim_preprocess_gds import import_flat_gds
+        for suffix in ('.oas', '.OASIS'):
+            source=self.workspace/('Chip_'+suffix[1:]+suffix)
+            library=gdstk.Library(unit=1e-6, precision=1e-9)
+            child=library.new_cell('CHILD');child.add(gdstk.rectangle((0,0),(8,12),layer=733,datatype=727))
+            top=library.new_cell('TOP');top.add(gdstk.Reference(child,origin=(2,3)))
+            library.write_oas(str(source))
+            source_bytes=source.read_bytes();layout=self.library.import_raw(source)
+            raw=self.library.raw(layout)
+            self.assertEqual(raw.suffix,suffix.lower());self.assertEqual(raw.read_bytes(),source_bytes)
+            self.assertEqual(self.library.import_raw(raw)['id'],layout['id'])
+            self.assertEqual(self.library.import_raw(source)['id'],layout['id'])
+            component=import_flat_gds(raw)
+            region=kdb.Region(component.kdb_cell.begin_shapes_rec(component.kcl.layout.layer(733,727)))
+            self.assertAlmostEqual(region.area()*component.kcl.dbu**2,96)
+            self.assertEqual(str(region.bbox()),'(2000,3000;10000,15000)')
+
+    def test_invalid_oasis_header_is_refused(self):
+        source=self.workspace/'bad.oas';source.write_bytes(b'not an OASIS layout')
+        with self.assertRaisesRegex(ValueError,'OASIS header'):self.library.import_raw(source)
+
     def test_same_filename_new_content_preserves_both_raw_versions(self):
         old=self.library.raw(self.layout).read_bytes();self.gds(self.source,extent=20)
         newer=self.library.import_raw(self.source)

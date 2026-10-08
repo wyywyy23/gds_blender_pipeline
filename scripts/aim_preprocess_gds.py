@@ -234,7 +234,10 @@ def get_bbox_margin(
 
 def import_flat_gds(path: str | Path) -> gf.Component:
     """
-    Import and flatten raw GDS using gdsfactory.
+    Import and flatten raw GDSII or OASIS using gdsfactory / KLayout.
+
+    KLayout detects the input format; OASIS hierarchy, units and layer/datatype
+    pairs are read directly, without an intermediate GDS conversion.
 
     Top-cell selection can be added as a CLI option if multi-top inputs become
     part of the preprocessing flow.

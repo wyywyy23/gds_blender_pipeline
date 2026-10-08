@@ -17,7 +17,7 @@ Standalone restoration needs only Python; continue with the normal setup below.
 Existing different files are preserved. Only authorized collaborators with the required
 vendor access may receive these private inputs. Usage history and outputs are excluded.
 
-A local web app for turning GDS layouts into Blender scenes and reproducible renders.
+A local web app for turning GDSII (`.gds`) and OASIS (`.oas`, `.oasis`) layouts into Blender scenes and reproducible renders. Raw inputs retain their original format and bytes; KLayout reads either format directly, and derived visual layouts are GDSII.
 Import a raw GDS, reuse or generate its visual GDS, and choose your camera angle in
 an interactive 3D preview **before** building a scene.
 The app runs independently from FacultyOS and uses deterministic scripts throughout.
@@ -143,3 +143,13 @@ app jobs remain in `.local/webapp/jobs/` and appear as legacy history when their
 checksum matches the selected layout. CLI outputs retain `.local/runs/<design>/`.
 
 Setup package `2026.09.24.1` pairs with software commit `28e8c889f8eb76eeed8e3093ec2cf638f016b2cf` and compatible descendants. It includes the four private AIM inputs and two matching editable finishing profiles; the software and render environment follow the setup instructions above.
+
+### Fixed TX checkered main light
+
+New Studio presets and missing lighting settings use Sun strength 5, fixed world XYZ
+rotation `(27.927, 0, 21.83)`, and `lighting.sun.follow_camera: false`. This is the
+original TX checkered main-light direction; camera changes leave it unchanged.
+Thin-film mode keeps its existing 90% Sun intensity (4.5) and camera-adaptive,
+cladding-only softbox. Explicit fixed rotations remain preserved. Historical presets
+that explicitly request `follow_camera: true` retain the opt-in TX camera-relative
+behavior; no historical files are rewritten. Saved scenes retain the applied lights.

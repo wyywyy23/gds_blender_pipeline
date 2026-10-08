@@ -363,12 +363,12 @@ class Handler(BaseHTTPRequestHandler):
     def upload(self):
         from urllib.parse import parse_qs
         name=parse_qs(urlsplit(self.path).query).get('name',[''])[0]
-        if not name or Path(name).name!=name or Path(name).suffix.lower()!='.gds':raise ValueError('Choose a .gds file')
-        if self.headers.get('Content-Type')!='application/octet-stream':raise ValueError('Binary GDS upload required')
+        if not name or Path(name).name!=name or Path(name).suffix.lower() not in ('.gds','.oas','.oasis'):raise ValueError('Choose a .gds, .oas or .oasis file')
+        if self.headers.get('Content-Type')!='application/octet-stream':raise ValueError('Binary layout upload required')
         size=int(self.headers.get('Content-Length','0'))
         if size<6 or size>1024**3:raise ValueError('GDS upload must be between 6 bytes and 1 GiB; use a local path for larger files')
         directory=self.studio.local/'uploads';directory.mkdir(exist_ok=True)
-        temporary=directory/(secrets.token_hex(16)+'.gds')
+        temporary=directory/(secrets.token_hex(16)+Path(name).suffix.lower())
         try:
             with temporary.open('xb') as stream:
                 remaining=size

@@ -28,6 +28,33 @@ FORMAT_EXTENSIONS = {
 }
 
 
+# Calibrated from disk_array_oblique_100mm and the original preset loader:
+# camera XYZ=(27.927, 0.000008, -21.83), Sun XYZ=(27.927, 0, 21.83).
+TX_CHECKERED_SUN_ROTATION = (27.927, 0.0, 21.83)
+TX_CHECKERED_RELATIVE_DIRECTION = (0.32333558170006965, 0.11443807915208248, 0.9393391441043321)
+
+
+def camera_relative_light_rotation(rotation_degrees, direction=TX_CHECKERED_RELATIVE_DIRECTION):
+    """Transport the baseline Sun ray in the camera's complete local XYZ frame."""
+    x, y, z = map(math.radians, rotation_degrees)
+    cx, sx, cy, sy, cz, sz = math.cos(x), math.sin(x), math.cos(y), math.sin(y), math.cos(z), math.sin(z)
+    matrix = ((cz*cy, cz*sy*sx-sz*cx, cz*sy*cx+sz*sx),
+              (sz*cy, sz*sy*sx+cz*cx, sz*sy*cx-cz*sx),
+              (-sy, cy*sx, cy*cx))
+    source = tuple(sum(row[i]*direction[i] for i in range(3)) for row in matrix)
+    return source_light_rotation(source)
+
+
+def source_light_rotation(source):
+    length = math.sqrt(sum(float(v)**2 for v in source))
+    if not math.isfinite(length) or length < 1e-12:
+        raise ValueError('Camera-relative lighting requires a finite nonzero direction')
+    source = tuple(float(v)/length for v in source)
+    tilt = math.acos(max(-1.0, min(1.0, source[2])))
+    azimuth = math.atan2(source[0], -source[1]) if math.hypot(*source[:2]) > 1e-12 else 0.0
+    return (math.degrees(tilt), 0.0, math.degrees(azimuth))
+
+
 def blender_argv(argv: list[str]) -> list[str]:
     if "--" in argv:
         return argv[argv.index("--") + 1 :]
@@ -160,6 +187,8 @@ def load_preset(path: Path) -> dict[str, Any]:
         raise ValueError("Only PERSP camera presets are currently supported")
 
     lighting_data = data.get("lighting")
+    if lighting_data is None:
+        lighting_data = {"sun": {"strength": 5.0, "follow_camera": False, "rotation_degrees": list(TX_CHECKERED_SUN_ROTATION)}}
     lighting = None
     if lighting_data is not None:
         lighting_data = require_mapping(lighting_data, "lighting")
@@ -167,14 +196,18 @@ def load_preset(path: Path) -> dict[str, Any]:
         sun_object = sun_data.get("object", "Sun")
         if not isinstance(sun_object, str) or not sun_object:
             raise ValueError("lighting.sun.object must be a non-empty string")
-        sun_rotation_any = sun_data.get("rotation_degrees")
-        if sun_rotation_any is None:
-            camera_rotation = camera["rotation_degrees"]
-            sun_rotation = (
-                camera_rotation[0],
-                0.0,
-                -camera_rotation[2],
-            )
+        sun_rotation_any = sun_data.get("rotation_degrees", list(TX_CHECKERED_SUN_ROTATION))
+        follow_camera = sun_data.get("follow_camera", False)
+        if not isinstance(follow_camera, bool):
+            raise ValueError("lighting.sun.follow_camera must be boolean")
+        if not follow_camera and sun_rotation_any is None:
+            raise ValueError("Fixed Sun lighting requires rotation_degrees")
+        relative_direction = require_vector3(
+            sun_data.get('camera_relative_direction', list(TX_CHECKERED_RELATIVE_DIRECTION)),
+            'lighting.sun.camera_relative_direction')
+        source_light_rotation(relative_direction)  # Validate nonzero before native execution.
+        if follow_camera:
+            sun_rotation = camera_relative_light_rotation(camera["rotation_degrees"], relative_direction)
             sun_rotation_source = "camera-derived default"
         else:
             sun_rotation = require_vector3(
@@ -189,6 +222,7 @@ def load_preset(path: Path) -> dict[str, Any]:
                 ),
                 "rotation_degrees": sun_rotation,
                 "rotation_source": sun_rotation_source,
+                "camera_relative_direction": relative_direction,
             }
         }
 
@@ -487,15 +521,26 @@ def apply_lighting(scene: Any, lighting_config: dict[str, Any] | None) -> None:
     sun = scene.objects.get(sun_config["object"])
     if sun is None or sun.type != "LIGHT" or sun.data.type != "SUN":
         raise ValueError(f"Sun light object not found: {sun_config['object']}")
+    if sun_config['rotation_source'] == 'camera-derived default':
+        import bpy
+        from mathutils import Vector
+        bpy.context.view_layer.update()
+        if scene.camera is None:
+            raise ValueError('Camera-following lighting requires an active camera')
+        relative = sun_config.get('camera_relative_direction', TX_CHECKERED_RELATIVE_DIRECTION)
+        source = scene.camera.matrix_world.to_quaternion() @ Vector(relative)
+        rotation = source_light_rotation(source)
+    else:
+        rotation = sun_config['rotation_degrees']
     sun.data.energy = sun_config["strength"]
     sun.rotation_mode = "XYZ"
     sun.rotation_euler = tuple(
-        math.radians(value) for value in sun_config["rotation_degrees"]
+        math.radians(value) for value in rotation
     )
     print(
         "Lighting preset: "
         f"sun={sun.name}, strength={sun.data.energy:g}, "
-        f"rotation_degrees={sun_config['rotation_degrees']} "
+        f"rotation_degrees={rotation} "
         f"({sun_config['rotation_source']})"
     )
 

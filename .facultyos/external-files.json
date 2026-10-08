@@ -18,7 +18,9 @@
     {
       "root": ".local/webapp/layouts",
       "include": [
-        "*/raw/*_raw.gds"
+        "*/raw/*_raw.gds",
+        "*/raw/*_raw.oas",
+        "*/raw/*_raw.oasis"
       ],
       "reason": "manual-only"
     },
